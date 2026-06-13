@@ -8,7 +8,7 @@
 (function () {
   'use strict';
 
-  var STORAGE_KEY = 'rems_data_v2';
+  var STORAGE_KEY = 'rems_data_v3';
   var SESSION_KEY = 'rems_auth';
   var ROLE_KEY = 'rems_role';
   var CTX_KEY = 'rems_ctx';
