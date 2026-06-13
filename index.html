@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>부동산 통합 관리 시스템</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- ===== 사이드바 ===== -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">🏢</div>
+      <div>
+        <div class="brand-title">부동산 관리</div>
+        <div class="brand-sub">양인석 · 조은희 · 현호키움</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active" data-tab="dashboard">📊 대시보드</button>
+      <button class="nav-item" data-tab="properties">🏘️ 부동산 현황</button>
+      <button class="nav-item" data-tab="leases">📋 임대차 관리</button>
+      <button class="nav-item" data-tab="tax">🧮 세금 계산기</button>
+      <button class="nav-item" data-tab="income">🧾 임대소득 신고</button>
+      <button class="nav-item" data-tab="todos">✅ 할일 / 민원</button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="btn btn-ghost btn-sm" id="btnExport">데이터 백업(JSON)</button>
+      <label class="btn btn-ghost btn-sm" for="fileImport">백업 불러오기</label>
+      <input type="file" id="fileImport" accept=".json" hidden>
+      <button class="btn btn-ghost btn-sm danger" id="btnReset">초기 데이터로 재설정</button>
+    </div>
+  </aside>
+
+  <!-- ===== 메인 ===== -->
+  <main class="main">
+
+    <!-- 대시보드 -->
+    <section class="tab" id="tab-dashboard">
+      <h1>대시보드</h1>
+      <div class="cards" id="dashCards"></div>
+      <div class="grid-2">
+        <div class="panel">
+          <h2>⏰ 계약 만기 임박 / 경과</h2>
+          <div id="dashExpiring"></div>
+        </div>
+        <div class="panel">
+          <h2>🛡️ 보증보험 미가입 임대차</h2>
+          <div id="dashInsurance"></div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <h2>📌 임박한 할일</h2>
+          <div id="dashTodos"></div>
+        </div>
+        <div class="panel">
+          <h2>👤 임대사업자 등록 정보</h2>
+          <div id="dashBiz"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 부동산 현황 -->
+    <section class="tab hidden" id="tab-properties">
+      <div class="page-head">
+        <h1>부동산 현황</h1>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost" id="btnExportPropCsv">엑셀(CSV) 내보내기</button>
+          <button class="btn btn-primary" id="btnAddProp">+ 물건 추가</button>
+        </div>
+      </div>
+      <div class="filters">
+        <select id="filterType"><option value="">전체 유형</option></select>
+        <select id="filterOwner"><option value="">전체 소유자</option></select>
+        <select id="filterRental"><option value="">전체 임대유형</option></select>
+        <input type="search" id="filterSearch" placeholder="주소·동호수 검색">
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="propTable">
+          <thead>
+            <tr>
+              <th>#</th><th>소유자</th><th>유형</th><th>임대유형</th><th>취득</th>
+              <th>주소</th><th>동호수</th><th>계약만기</th><th>D-day</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 임대차 관리 -->
+    <section class="tab hidden" id="tab-leases">
+      <div class="page-head">
+        <h1>임대차 관리</h1>
+        <button class="btn btn-ghost" id="btnExportLeaseCsv">엑셀(CSV) 내보내기</button>
+      </div>
+      <div class="panel">
+        <h2>📈 임대료 5% 증액 상한 계산</h2>
+        <div class="form-row">
+          <label>현재 보증금(원) <input type="text" id="incDeposit" class="num" placeholder="예: 200,000,000"></label>
+          <label>현재 월세(원) <input type="text" id="incMonthly" class="num" placeholder="예: 500,000"></label>
+          <label>증액률(%) <input type="number" id="incRate" value="5" step="0.5" min="0" max="5"></label>
+          <button class="btn btn-primary" id="btnIncCalc">계산</button>
+        </div>
+        <div class="result" id="incResult"></div>
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="leaseTable">
+          <thead>
+            <tr>
+              <th>물건</th><th>임차인</th><th>연락처</th><th>계약기간</th><th>만기 D-day</th>
+              <th>보증금</th><th>월세</th><th>보증보험</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 세금 계산기 -->
+    <section class="tab hidden" id="tab-tax">
+      <h1>세금 계산기</h1>
+      <p class="disclaimer">※ 2025년 기준 세율을 적용한 <b>예상치</b>입니다. 실제 신고 시 세무 전문가의 확인이 필요합니다.</p>
+
+      <div class="tax-tabs">
+        <button class="tax-tab active" data-taxtab="acq">취득세</button>
+        <button class="tax-tab" data-taxtab="hold">보유세 (재산세·종부세)</button>
+        <button class="tax-tab" data-taxtab="transfer">양도소득세</button>
+      </div>
+
+      <!-- 취득세 -->
+      <div class="panel taxpane" id="taxpane-acq">
+        <div class="form-grid">
+          <label>부동산 종류
+            <select id="acqKind">
+              <option value="house">주택 (아파트·빌라)</option>
+              <option value="officetel">오피스텔 (건축물 취득)</option>
+              <option value="land">토지</option>
+              <option value="building">일반 건물·상가</option>
+            </select>
+          </label>
+          <label>취득 원인
+            <select id="acqCause">
+              <option value="buy">매매 (유상취득)</option>
+              <option value="new">신축 (원시취득)</option>
+              <option value="inherit">상속</option>
+              <option value="gift">증여</option>
+            </select>
+          </label>
+          <label>취득가액(원) <input type="text" id="acqPrice" class="num" placeholder="예: 500,000,000"></label>
+          <label>취득 후 보유 주택 수
+            <select id="acqHouseCount">
+              <option value="1">1주택</option>
+              <option value="2">2주택</option>
+              <option value="3">3주택</option>
+              <option value="4">4주택 이상</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="acqAdjusted"> 조정대상지역</label>
+          <label class="check"><input type="checkbox" id="acqOver85"> 전용 85㎡ 초과</label>
+        </div>
+        <button class="btn btn-primary" id="btnAcqCalc">취득세 계산</button>
+        <div class="result" id="acqResult"></div>
+      </div>
+
+      <!-- 보유세 -->
+      <div class="panel taxpane hidden" id="taxpane-hold">
+        <h3>재산세 (물건별)</h3>
+        <div class="form-grid">
+          <label>보유 물건에서 불러오기
+            <select id="holdPropPick"><option value="">— 직접 입력 —</option></select>
+          </label>
+          <label>공시가격(원) <input type="text" id="holdPrice" class="num" placeholder="예: 300,000,000"></label>
+          <label class="check"><input type="checkbox" id="holdOneSpecial"> 1세대1주택 특례 (공시 9억 이하)</label>
+        </div>
+        <button class="btn btn-primary" id="btnHoldCalc">재산세 계산</button>
+        <div class="result" id="holdResult"></div>
+
+        <hr>
+
+        <h3>종합부동산세 (인별 합산)</h3>
+        <div class="form-grid">
+          <label>보유주택 공시가격 합계(원) <input type="text" id="jbSum" class="num" placeholder="예: 2,000,000,000"></label>
+          <label>합산배제 공시가격(등록임대 등)(원) <input type="text" id="jbExcluded" class="num" placeholder="예: 800,000,000"></label>
+          <label>주택 수
+            <select id="jbCount">
+              <option value="1">1주택</option>
+              <option value="2">2주택</option>
+              <option value="3">3주택 이상</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="jbOneHouse"> 1세대 1주택 (공제 12억)</label>
+        </div>
+        <div class="form-row">
+          <button class="btn btn-primary" id="btnJbCalc">종부세 계산</button>
+          <button class="btn btn-ghost" id="btnJbAuto">보유 물건 공시가격으로 인별 자동 합산</button>
+        </div>
+        <div class="result" id="jbResult"></div>
+        <p class="hint">※ 임대 개시일 당시 기준시가 6억(수도권 외 3억) 이하 등 요건을 충족한 등록임대주택은 합산배제 신고 시 종부세 과세 대상에서 제외됩니다. 자동 합산은 각 물건의 최근 연도 공시가격을 소유자별로 더하고, '주택임대사업자' 등록 물건을 합산배제로 처리합니다.</p>
+        <div class="result" id="jbAutoResult"></div>
+      </div>
+
+      <!-- 양도세 -->
+      <div class="panel taxpane hidden" id="taxpane-transfer">
+        <div class="form-grid">
+          <label>보유 물건에서 불러오기
+            <select id="trPropPick"><option value="">— 직접 입력 —</option></select>
+          </label>
+          <label>양도가액(원) <input type="text" id="trSale" class="num" placeholder="예: 900,000,000"></label>
+          <label>취득가액(원) <input type="text" id="trBuy" class="num" placeholder="예: 600,000,000"></label>
+          <label>필요경비(원) <input type="text" id="trExp" class="num" placeholder="취득세·중개수수료·수리비 등"></label>
+          <label>취득일 <input type="date" id="trBuyDate"></label>
+          <label>양도일 <input type="date" id="trSaleDate"></label>
+          <label>다주택 중과
+            <select id="trHeavy">
+              <option value="0">없음 (중과 유예/일반)</option>
+              <option value="20">2주택 중과 (+20%p)</option>
+              <option value="30">3주택 이상 중과 (+30%p)</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="trIsHouse" checked> 주택</label>
+          <label class="check"><input type="checkbox" id="trOneExempt"> 1세대1주택 비과세 대상</label>
+          <label>거주기간(년, 1주택 장특공제용) <input type="number" id="trResYears" value="0" min="0" max="10"></label>
+        </div>
+        <button class="btn btn-primary" id="btnTrCalc">양도세 계산</button>
+        <div class="result" id="trResult"></div>
+      </div>
+    </section>
+
+    <!-- 임대소득 신고 (소득현황/사업장현황) -->
+    <section class="tab hidden" id="tab-income">
+      <div class="page-head">
+        <h1>임대소득 신고 (사업장현황신고)</h1>
+        <button class="btn btn-ghost" id="btnExportIncomeCsv">엑셀(CSV) 내보내기</button>
+      </div>
+      <p class="disclaimer">※ 주택임대 사업장현황신고(매년 2월)·종합소득세 신고 참고용 <b>추정 수입금액</b>입니다. 등록임대주택 세액감면, 소형주택 제외, 분리과세 여부 등은 반영되지 않았습니다.</p>
+
+      <div class="panel">
+        <h2>💰 간주임대료 계산 (보증금 기준)</h2>
+        <div class="form-row">
+          <label>임대보증금 합계(원) <input type="text" id="drDeposit" class="num" placeholder="예: 1,500,000,000"></label>
+          <label>정기예금이자율(%) <input type="number" id="drRate" step="0.1" value="3.5"></label>
+          <label class="check"><input type="checkbox" id="drApply" checked> 부부합산 3주택 이상 (간주임대료 대상)</label>
+          <button class="btn btn-primary" id="btnDrCalc">계산</button>
+        </div>
+        <div class="result" id="drResult"></div>
+      </div>
+
+      <div class="cards" id="incomeCards"></div>
+
+      <div class="filters">
+        <select id="incomeOwner"><option value="">전체 소유자</option></select>
+        <label class="check" style="display:flex;align-items:center;gap:6px;font-size:13px">
+          <input type="checkbox" id="incomeDeemed" checked> 간주임대료 포함(3주택 이상)
+        </label>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table" id="incomeTable">
+          <thead>
+            <tr>
+              <th>물건</th><th>소유자</th><th>임대유형</th><th>임차인</th><th>계약기간</th>
+              <th>보증금</th><th>월세</th><th>연 월세수입</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+    </section>
+
+    <!-- 할일/민원 -->
+    <section class="tab hidden" id="tab-todos">
+      <div class="page-head">
+        <h1>할일 / 민원 처리</h1>
+      </div>
+      <div class="panel">
+        <div class="form-row">
+          <input type="text" id="todoTitle" placeholder="할일 내용" style="flex:2">
+          <input type="text" id="todoNote" placeholder="비고" style="flex:1">
+          <input type="date" id="todoDue">
+          <button class="btn btn-primary" id="btnAddTodo">추가</button>
+        </div>
+      </div>
+      <div id="todoList"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ===== 물건 추가/수정 모달 ===== -->
+<div class="modal-bg hidden" id="modalBg">
+  <div class="modal">
+    <h2 id="modalTitle">물건 정보</h2>
+    <input type="hidden" id="mId">
+    <div class="form-grid">
+      <label>소유자 <input type="text" id="mOwner"></label>
+      <label>유형
+        <select id="mType">
+          <option>아파트</option><option>오피스텔</option><option>빌라(다세대)</option>
+          <option>오피스</option><option>토지</option><option>기타</option>
+        </select>
+      </label>
+      <label>임대유형 <input type="text" id="mRentalType" placeholder="예: 주택임대사업자(10년)"></label>
+      <label>취득연도 <input type="text" id="mAcquireYear" placeholder="예: 2021"></label>
+      <label>취득일 <input type="date" id="mAcquireDate"></label>
+      <label>취득가액(원) <input type="text" id="mAcquirePrice" class="num" placeholder="양도세 계산용"></label>
+      <label>주임사 등록일 <input type="date" id="mRegDate"></label>
+      <label>동호수 <input type="text" id="mUnit"></label>
+      <label class="wide">주소 <input type="text" id="mAddress"></label>
+      <label class="wide">메모 <input type="text" id="mMemo"></label>
+    </div>
+
+    <h3>🗺️ 지도 · 부동산 공부 열람</h3>
+    <div class="map-links" id="mMapLinks"></div>
+    <div id="mMapBox" class="map-box hidden"></div>
+    <div class="form-row" style="margin-top:8px">
+      <label style="flex:2">카카오맵 JavaScript 키 (선택, 입력 시 지도 미리보기)
+        <input type="text" id="mKakaoKey" placeholder="카카오 개발자센터 JavaScript 키">
+      </label>
+      <button class="btn btn-ghost" id="btnSaveKakao">키 저장</button>
+    </div>
+
+    <h3>📈 연도별 공시가격 <span class="hint" style="font-weight:400">(재산세·종부세 계산용 / 부동산공시가격알리미 조회)</span></h3>
+    <div class="form-row">
+      <label>연도 <input type="number" id="mPriceYear" placeholder="예: 2025" style="width:120px"></label>
+      <label>공시가격(원) <input type="text" id="mPriceVal" class="num" placeholder="예: 250,000,000"></label>
+      <button class="btn btn-ghost" id="btnAddPrice">추가</button>
+      <button class="link-btn" id="btnOpenRealtyPrice" type="button">공시가격알리미 열기</button>
+    </div>
+    <table class="table" id="mPriceTable" style="margin-top:6px">
+      <thead><tr><th>연도</th><th>공시가격</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h3>임대차 계약 <label class="check inline"><input type="checkbox" id="mHasLease"> 계약 있음</label></h3>
+    <div class="form-grid" id="mLeaseFields">
+      <label>계약 시작일 <input type="date" id="mLeaseStart"></label>
+      <label>계약 만기일 <input type="date" id="mLeaseEnd"></label>
+      <label>보증금(원) <input type="text" id="mDeposit" class="num"></label>
+      <label>월세(원) <input type="text" id="mMonthly" class="num"></label>
+      <label>임차인 성명 <input type="text" id="mTenant"></label>
+      <label>임차인 연락처 <input type="text" id="mTenantPhone"></label>
+      <label class="check"><input type="checkbox" id="mInsJoined"> 보증보험 가입</label>
+      <label>보증보험 가입기간 <input type="text" id="mInsPeriod" placeholder="예: 23.05~24.05"></label>
+      <label>보증보험 수수료(원) <input type="text" id="mInsFee" class="num"></label>
+      <label>임차인 부담분(25%)(원) <input type="text" id="mInsTenantShare" class="num"></label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnModalCancel">취소</button>
+      <button class="btn danger btn-ghost hidden" id="btnModalDelete">삭제</button>
+      <button class="btn btn-primary" id="btnModalSave">저장</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/data.js"></script>
+<script src="js/tax.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

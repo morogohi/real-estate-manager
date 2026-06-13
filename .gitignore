@@ -1,0 +1,25 @@
+# ===== PyInstaller 빌드 산출물 =====
+build/
+dist/
+*.manifest
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ===== 사용자 데이터 (개인정보, 저장소에 올리지 않음) =====
+부동산관리_데이터.json
+내데이터_복원용.json
+*복원용.json
+부동산관리_백업_*.json
+*.json.tmp
+
+# ===== OS / 에디터 =====
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
+desktop.ini
