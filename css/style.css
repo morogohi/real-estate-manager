@@ -58,6 +58,22 @@ body.auth-locked { overflow: hidden; }
 .auth-msg { min-height: 18px; margin-top: 12px; font-size: 13px; color: var(--danger); }
 .auth-foot { margin-top: 14px; font-size: 11px; color: #9ca3af; line-height: 1.5; }
 
+/* ===== 역할(소유자/중개사) ===== */
+body.role-agent .owner-only { display: none !important; }
+.role-tag {
+  margin-top: 8px; font-size: 11px; color: #93c5fd;
+  text-align: center; opacity: .85;
+}
+.muted-sm { color: #9ca3af; font-size: 12px; }
+
+/* 중개사 계정 관리 */
+.acct-add { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.acct-add input { flex: 1; min-width: 120px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
+.acct-deploy { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border); }
+.acct-deploy h3 { font-size: 14px; margin-bottom: 6px; }
+.acct-msg { margin-top: 10px; font-size: 13px; min-height: 18px; }
+#acctTable code, #acctTable .muted-sm { font-size: 12px; }
+
 /* ===== 레이아웃 ===== */
 .layout { display: flex; min-height: 100vh; }
 .main { flex: 1; padding: 28px 36px; max-width: 1280px; }

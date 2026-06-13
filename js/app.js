@@ -224,11 +224,12 @@ function renderProperties() {
       <td>${p.acquireYear ? p.acquireYear + '년' : '-'}</td>
       <td class="addr">${p.address}<span class="map-mini" data-mapid="${p.id}">지도</span></td>
       <td>${p.unit || '-'}</td>
+      <td class="owner-only">${managerName(p.managerId) || '<span class="muted-sm">미지정</span>'}</td>
       <td>${p.lease ? p.lease.end : '-'}</td>
       <td>${ddayBadge(p.lease ? ddayOf(p.lease.end) : null)}</td>
       <td><button class="link-btn" onclick="openModal(${p.id})">상세</button></td>
     </tr>`).join('') ||
-    '<tr><td colspan="10" class="empty">조건에 맞는 물건이 없습니다.</td></tr>';
+    '<tr><td colspan="11" class="empty">조건에 맞는 물건이 없습니다.</td></tr>';
 }
 
 // 목록의 '지도' 빠른 링크 (카카오맵)
@@ -345,6 +346,12 @@ function openModal(id) {
   $('#mAcquireDate').value = p?.acquireDate || '';
   $('#mAcquirePrice').value = p?.acquirePrice ? fmt(p.acquirePrice) : '';
 
+  // 관리 공인중개사 선택지
+  $('#mManager').innerHTML = '<option value="">— 미지정 —</option>' +
+    (Store.data.accounts || []).map(a =>
+      `<option value="${a.id}">${a.name ? `${a.name} (${a.id})` : a.id}</option>`).join('');
+  $('#mManager').value = p?.managerId || '';
+
   // 연도별 공시가격
   modalPriceHistory = p ? (p.priceHistory || []).map(x => ({ ...x })) : [];
   renderModalPrices();
@@ -416,6 +423,7 @@ $('#btnModalSave').addEventListener('click', () => {
     address: $('#mAddress').value.trim(),
     unit: $('#mUnit').value.trim(),
     memo: $('#mMemo').value.trim(),
+    managerId: $('#mManager').value,
     priceHistory: modalPriceHistory.map(r => ({ year: Number(r.year), price: Number(r.price) })),
     lease,
   };
@@ -767,6 +775,118 @@ $('#btnReset').addEventListener('click', () => {
 });
 
 /* =========================================================
+ * 공인중개사 계정 관리 / 배정 / 로그인 파일 생성 (소유자 전용)
+ * ========================================================= */
+
+function managerName(id) {
+  if (!id) return '';
+  const a = (Store.data.accounts || []).find(x => x.id === id);
+  return a ? (a.name || a.id) : id;
+}
+
+function downloadText(filename, content) {
+  const blob = new Blob([content], { type: 'text/javascript;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function acctMsg(text, isErr) {
+  const m = $('#acctMsg');
+  if (!m) return;
+  m.textContent = text || '';
+  m.style.color = isErr ? 'var(--danger)' : 'var(--ok)';
+}
+
+function renderAccounts() {
+  const accts = Store.data.accounts || [];
+  const counts = {};
+  Store.data.properties.forEach(p => { if (p.managerId) counts[p.managerId] = (counts[p.managerId] || 0) + 1; });
+  $('#acctTable tbody').innerHTML = accts.length
+    ? accts.map(a => `
+      <tr>
+        <td>${a.id}</td>
+        <td>${a.name || '-'}</td>
+        <td><code>${a.pw || ''}</code></td>
+        <td>${counts[a.id] || 0}건</td>
+        <td><button class="link-btn" data-delacct="${a.id}">삭제</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" class="empty">등록된 중개사가 없습니다.</td></tr>';
+}
+
+$('#btnAccounts').addEventListener('click', () => {
+  renderAccounts(); acctMsg('');
+  $('#acctModalBg').classList.remove('hidden');
+});
+$('#btnAcctClose').addEventListener('click', () => $('#acctModalBg').classList.add('hidden'));
+$('#acctModalBg').addEventListener('click', e => {
+  if (e.target === $('#acctModalBg')) $('#acctModalBg').classList.add('hidden');
+});
+
+$('#btnAddAcct').addEventListener('click', () => {
+  const id = $('#acId').value.trim(), name = $('#acName').value.trim(), pw = $('#acPw').value.trim();
+  if (!id || !pw) { alert('아이디와 비밀번호는 필수입니다.'); return; }
+  if ((Store.data.accounts || []).some(a => a.id === id)) { alert('이미 존재하는 아이디입니다.'); return; }
+  Store.data.accounts.push({ id, name, pw });
+  Store.save();
+  $('#acId').value = ''; $('#acName').value = ''; $('#acPw').value = '';
+  renderAccounts();
+});
+
+$('#acctTable').addEventListener('click', e => {
+  const id = e.target.dataset.delacct;
+  if (id == null) return;
+  if (!confirm(`중개사 '${id}' 계정을 삭제할까요? 해당 물건의 배정도 해제됩니다.`)) return;
+  Store.data.accounts = Store.data.accounts.filter(a => a.id !== id);
+  Store.data.properties.forEach(p => { if (p.managerId === id) p.managerId = ''; });
+  Store.save();
+  renderAccounts(); renderProperties();
+});
+
+// 중개사별 "배정 물건만" 암호화한 로그인 파일 생성
+$('#btnGenAccounts').addEventListener('click', async () => {
+  const accts = Store.data.accounts || [];
+  if (!accts.length) { acctMsg('등록된 중개사가 없습니다.', true); return; }
+  acctMsg('생성 중…');
+  try {
+    const entries = [];
+    for (const a of accts) {
+      if (!a.id || !a.pw) { acctMsg(`아이디/비밀번호 누락: ${a.id || '(빈 아이디)'}`, true); return; }
+      const subset = {
+        business: Store.data.business,
+        properties: Store.data.properties.filter(p => p.managerId === a.id),
+        todos: [],
+        accounts: [],
+        settings: { kakaoKey: '', deemedRate: Store.data.settings?.deemedRate ?? 3.5 },
+      };
+      entries.push(await REMSCrypto.encryptJSON(a.id, a.pw, subset));
+    }
+    downloadText('accounts.enc.js',
+      '/* 공인중개사 로그인용 암호문 (자동 생성). js/accounts.enc.js 에 덮어쓰고 배포하세요. */\n' +
+      'window.__REMS_ACCOUNTS__ = ' + JSON.stringify(entries) + ';\n');
+    acctMsg(`완료: 중개사 ${entries.length}명 파일 생성. 다운로드한 accounts.enc.js를 js/ 폴더에 올려 배포하세요.`);
+  } catch (e) { acctMsg('생성 실패: ' + e.message, true); }
+});
+
+// 소유자 마스터(data.enc.js) 재생성 - 배정/계정 변경을 서버에도 반영
+$('#btnGenMaster').addEventListener('click', async () => {
+  if (!window.__REMS_ENC__) { acctMsg('이 환경에서는 마스터 재생성을 사용할 수 없습니다.', true); return; }
+  const id = prompt('소유자 아이디를 입력하세요'); if (!id) return;
+  const pw = prompt('소유자 비밀번호를 입력하세요'); if (!pw) return;
+  try { await REMSCrypto.decryptToText(id, pw, window.__REMS_ENC__); }
+  catch (e) { acctMsg('소유자 계정이 올바르지 않습니다.', true); return; }
+  try {
+    const entry = await REMSCrypto.encryptJSON(id, pw, Store.data);
+    downloadText('data.enc.js',
+      '/* 실데이터(AES-GCM 암호화). 아이디+비밀번호로만 복호화됩니다. 평문 개인정보 없음. */\n' +
+      'window.__REMS_ENC__ = ' + JSON.stringify(entry) + ';\n');
+    acctMsg('완료: data.enc.js 생성. js/ 폴더에 올리면 배정·계정이 서버에도 반영됩니다.');
+  } catch (e) { acctMsg('생성 실패: ' + e.message, true); }
+});
+
+/* =========================================================
  * 임대소득 신고 (사업장현황신고)
  * ========================================================= */
 
@@ -851,6 +971,12 @@ $('#btnExportIncomeCsv').addEventListener('click', () => {
  * ========================================================= */
 
 function renderAll() {
+  const roleTag = $('#roleTag');
+  if (roleTag) {
+    const r = window.__REMS_ROLE__;
+    roleTag.textContent = r === 'agent' ? '공인중개사 모드 (배정 물건만 표시)'
+      : (r === 'owner' ? '소유자 모드' : '');
+  }
   renderDashboard();
   renderProperties();
   renderLeases();

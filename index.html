@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>부동산 통합 관리 시스템</title>
-<link rel="stylesheet" href="css/style.css?v=201">
+<link rel="stylesheet" href="css/style.css?v=210">
 </head>
 <body>
 
@@ -30,11 +30,13 @@
     </nav>
 
     <div class="sidebar-footer">
+      <button class="btn btn-ghost btn-sm owner-only" id="btnAccounts">👤 중개사 계정 관리</button>
       <button class="btn btn-ghost btn-sm" id="btnExport">데이터 백업(JSON)</button>
-      <label class="btn btn-ghost btn-sm" for="fileImport">백업 불러오기</label>
+      <label class="btn btn-ghost btn-sm owner-only" for="fileImport">백업 불러오기</label>
       <input type="file" id="fileImport" accept=".json" hidden>
-      <button class="btn btn-ghost btn-sm danger" id="btnReset">초기 데이터로 재설정</button>
+      <button class="btn btn-ghost btn-sm danger owner-only" id="btnReset">초기 데이터로 재설정</button>
       <button class="btn btn-ghost btn-sm" id="btnLogout">🔒 로그아웃</button>
+      <div class="role-tag" id="roleTag"></div>
     </div>
   </aside>
 
@@ -73,7 +75,7 @@
         <h1>부동산 현황</h1>
         <div style="display:flex; gap:8px;">
           <button class="btn btn-ghost" id="btnExportPropCsv">엑셀(CSV) 내보내기</button>
-          <button class="btn btn-primary" id="btnAddProp">+ 물건 추가</button>
+          <button class="btn btn-primary owner-only" id="btnAddProp">+ 물건 추가</button>
         </div>
       </div>
       <div class="filters">
@@ -87,7 +89,7 @@
           <thead>
             <tr>
               <th>#</th><th>소유자</th><th>유형</th><th>임대유형</th><th>취득</th>
-              <th>주소</th><th>동호수</th><th>계약만기</th><th>D-day</th><th></th>
+              <th>주소</th><th>동호수</th><th class="owner-only">관리 중개사</th><th>계약만기</th><th>D-day</th><th></th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -316,6 +318,9 @@
       <label>동호수 <input type="text" id="mUnit"></label>
       <label class="wide">주소 <input type="text" id="mAddress"></label>
       <label class="wide">메모 <input type="text" id="mMemo"></label>
+      <label class="wide owner-only">관리 공인중개사
+        <select id="mManager"><option value="">— 미지정 —</option></select>
+      </label>
     </div>
 
     <h3>🗺️ 지도 · 부동산 공부 열람</h3>
@@ -354,17 +359,55 @@
       <label>임차인 부담분(25%)(원) <input type="text" id="mInsTenantShare" class="num"></label>
     </div>
     <div class="modal-actions">
-      <button class="btn btn-ghost" id="btnModalCancel">취소</button>
-      <button class="btn danger btn-ghost hidden" id="btnModalDelete">삭제</button>
-      <button class="btn btn-primary" id="btnModalSave">저장</button>
+      <button class="btn btn-ghost" id="btnModalCancel">닫기</button>
+      <button class="btn danger btn-ghost hidden owner-only" id="btnModalDelete">삭제</button>
+      <button class="btn btn-primary owner-only" id="btnModalSave">저장</button>
     </div>
   </div>
 </div>
 
-<script src="js/data.js?v=201"></script>
-<script src="js/data.enc.js?v=201"></script>
-<script src="js/auth.js?v=201"></script>
-<script src="js/tax.js?v=201"></script>
-<script src="js/app.js?v=201"></script>
+<!-- 공인중개사 계정 관리 모달 (소유자 전용) -->
+<div class="modal-bg hidden" id="acctModalBg">
+  <div class="modal">
+    <h2>👤 공인중개사 계정 관리</h2>
+    <p class="hint">중개사 계정을 등록하고, 각 물건의 "관리 공인중개사"로 지정하세요. 중개사는 로그인 시 <b>본인에게 배정된 물건만</b> 보게 됩니다.</p>
+
+    <div class="acct-add">
+      <input type="text" id="acId" placeholder="중개사 아이디(영문/숫자)">
+      <input type="text" id="acName" placeholder="이름/상호">
+      <input type="text" id="acPw" placeholder="비밀번호">
+      <button class="btn btn-primary btn-sm" id="btnAddAcct">+ 추가</button>
+    </div>
+
+    <div class="table-wrap" style="margin-top:12px;">
+      <table class="table" id="acctTable">
+        <thead><tr><th>아이디</th><th>이름/상호</th><th>비밀번호</th><th>배정 물건수</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="acct-deploy">
+      <h3>🔐 중개사 로그인 파일 생성</h3>
+      <p class="hint">아래 버튼으로 <code>accounts.enc.js</code>(중개사별 배정 물건만 암호화)와 <code>data.enc.js</code>(소유자 마스터)를 내려받아 GitHub 저장소에 올리면 중개사 로그인이 적용됩니다. 소유자 비밀번호가 필요합니다.</p>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btnGenAccounts">중개사 로그인 파일(accounts.enc.js) 생성</button>
+        <button class="btn btn-ghost" id="btnGenMaster">마스터(data.enc.js) 재생성</button>
+      </div>
+      <div class="acct-msg" id="acctMsg"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnAcctClose">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/crypto-util.js?v=210"></script>
+<script src="js/data.js?v=210"></script>
+<script src="js/data.enc.js?v=210"></script>
+<script src="js/accounts.enc.js?v=210"></script>
+<script src="js/auth.js?v=210"></script>
+<script src="js/tax.js?v=210"></script>
+<script src="js/app.js?v=210"></script>
 </body>
 </html>

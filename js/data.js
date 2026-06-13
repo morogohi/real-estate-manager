@@ -53,6 +53,7 @@ const Store = {
       business: SEED_BUSINESS,
       properties: SEED_PROPERTIES,
       todos: SEED_TODOS,
+      accounts: [], // 공인중개사 계정 [{ id, name, pw }]
       settings: { kakaoKey: '', deemedRate: 3.5 },
     };
   },
@@ -63,10 +64,12 @@ const Store = {
     if (!d.settings) d.settings = {};
     if (d.settings.deemedRate == null) d.settings.deemedRate = 3.5;
     if (d.settings.kakaoKey == null) d.settings.kakaoKey = '';
+    if (!Array.isArray(d.accounts)) d.accounts = []; // 공인중개사 계정
     (d.properties || []).forEach(p => {
       if (p.acquirePrice == null) p.acquirePrice = 0;       // 취득가액
       if (p.acquireDate == null) p.acquireDate = '';         // 취득일(정확한 날짜)
       if (!Array.isArray(p.priceHistory)) p.priceHistory = []; // 연도별 공시가격 [{year, price}]
+      if (p.managerId == null) p.managerId = '';             // 관리 공인중개사 계정 id
     });
   },
 
