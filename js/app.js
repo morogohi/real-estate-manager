@@ -866,5 +866,7 @@ function boot() {
   Store.load().then(renderAll);
 }
 
-window.addEventListener('pywebviewready', boot);
-setTimeout(() => { if (!booted) boot(); }, 250);
+/* 로그인 게이트(auth.js)가 활성화된 웹 환경에서는 인증 성공 후 boot() 호출 */
+window.__remsBoot = boot;
+window.addEventListener('pywebviewready', () => { if (!window.__REMS_AUTH_GATE__) boot(); });
+setTimeout(() => { if (!booted && !window.__REMS_AUTH_GATE__) boot(); }, 250);
