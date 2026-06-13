@@ -7,7 +7,7 @@
 (function () {
   'use strict';
 
-  var STORAGE_KEY = 'rems_data_v1'; // data.js 와 동일
+  var STORAGE_KEY = 'rems_data_v2'; // data.js 와 동일
   var SESSION_KEY = 'rems_auth';
 
   // 데스크톱(file://)에서는 게이트 비활성화 → app.js 가 정상 부팅
@@ -68,10 +68,9 @@
         var jsonText = await decrypt(id, pw);
         var parsed = JSON.parse(jsonText);
         if (!parsed || !parsed.properties) throw new Error('bad');
-        // 기존 작업 데이터가 없을 때만 실데이터로 시드(이전 편집분 보존)
-        if (!localStorage.getItem(STORAGE_KEY)) {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-        }
+        // 로그인 시 항상 복호화한 실데이터(마스터)를 적재 → 누락 방지
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        try { localStorage.removeItem('rems_data_v1'); } catch (e) {} // 옛 샘플 정리
         sessionStorage.setItem(SESSION_KEY, '1');
         ov.remove();
         document.body.classList.remove('auth-locked');
