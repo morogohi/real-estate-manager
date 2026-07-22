@@ -261,13 +261,19 @@ function setManager(propId, managerId, { silent } = {}) {
       REMSSync.pushAccounts(Store.data)
         .then(() => {
           const el = $('#mgrBulkMsg');
-          if (el) el.textContent = (el.textContent || '') + ' ✓ 중개사 배정 클라우드 반영됨';
+          if (el) el.textContent = (el.textContent.split('·')[0] || '').trim() + ' ✓ 중개사·대시보드 배정 클라우드 반영됨 (중개사는 재로그인)';
         })
         .catch(err => {
           const el = $('#mgrBulkMsg');
           if (el) el.textContent = `배정 저장됨 · 클라우드 반영 실패: ${err.message}`;
         });
     }, 1500);
+  } else if (!silent) {
+    // 토큰 없으면 중개사 계정에 반영되지 않음 → 설정 모달 안내
+    setTimeout(() => {
+      alert('배정은 관리자 화면에만 저장되었습니다.\n\n중개사 로그인·대시보드에 바로 반영하려면:\n① ☁️ 클라우드 동기화에서 GitHub 토큰을 저장하고\n② 「지금 업로드」를 눌러주세요.\n\n(토큰이 없으면 해제한 물건이 중개사 계정에 계속 보일 수 있습니다.)');
+      $('#btnSync')?.click();
+    }, 100);
   }
   if (!silent) {
     const msg = next

@@ -55,11 +55,18 @@
     throw new Error('invalid');
   }
 
-  /** 중개사: 항상 복호화본으로 properties 교체. 소유자: 후보 중 최신 */
+  /** 중개사: 항상 복호화본으로 properties 교체 + 공개 배정표로 재필터. 소유자: 후보 중 최신 */
   async function resolveLoginData(role, id, pw, parsed) {
     if (role === 'agent') {
-      // 배정 해제가 반영되도록 로컬에 남은 옛 물건 목록을 쓰지 않음
-      return parsed;
+      var data = parsed;
+      var assignDoc = null;
+      if (window.REMSSync && REMSSync.pullAssignments) {
+        try { assignDoc = await REMSSync.pullAssignments(); } catch (e) {}
+      }
+      if (window.REMSSync && REMSSync.applyAssignmentFilter) {
+        data = REMSSync.applyAssignmentFilter(data, id, assignDoc);
+      }
+      return data;
     }
     var candidates = [];
     var ctx = await REMSCrypto.sha256hex(role + '|' + id);
@@ -90,6 +97,9 @@
       if (!text) return;
       var remote = JSON.parse(text);
       if (!remote || !remote.properties) return;
+      var assignDoc = null;
+      try { assignDoc = await REMSSync.pullAssignments(); } catch (e) {}
+      remote = REMSSync.applyAssignmentFilter(remote, c.id, assignDoc);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
       if (window.Store) {
         Store.data = remote;

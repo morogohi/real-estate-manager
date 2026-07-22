@@ -13,9 +13,11 @@ window.REMSSync = (function () {
   var REPO = 'morogohi/real-estate-manager';
   var PATH = 'data/sync.enc.json';
   var ACCOUNTS_PATH = 'data/accounts.enc.json'; // 중개사 배정 최신본 (배정 변경 즉시 반영)
+  var ASSIGN_PATH = 'data/assignments.json';   // 공개 배정표(중개사별 물건 id) — 암호문과 이중 검증
   var BRANCH = 'sync-data'; // 별도 브랜치: 동기화 커밋이 사이트 재배포를 유발하지 않음
   var API = 'https://api.github.com/repos/' + REPO + '/contents/' + PATH;
   var ACCOUNTS_API = 'https://api.github.com/repos/' + REPO + '/contents/' + ACCOUNTS_PATH;
+  var ASSIGN_API = 'https://api.github.com/repos/' + REPO + '/contents/' + ASSIGN_PATH;
   var CRED_KEY = 'rems_k';
   var LAST_PUSH_KEY = 'rems_last_push';
   var LAST_ACCT_KEY = 'rems_last_acct_push';
@@ -61,6 +63,41 @@ window.REMSSync = (function () {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     var data = JSON.parse(await res.text());
     return Array.isArray(data) ? data : [];
+  }
+
+  /** 공개 배정표 { map: { agentId: [propId,...] }, updatedAt } */
+  async function pullAssignments() {
+    var res = await fetch(ASSIGN_API + '?ref=' + BRANCH + '&_=' + Date.now(), {
+      headers: { 'Accept': 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return JSON.parse(await res.text());
+  }
+
+  function buildAssignments(data) {
+    var map = {};
+    ((data && data.accounts) || []).forEach(function (a) { if (a.id) map[a.id] = []; });
+    ((data && data.properties) || []).forEach(function (p) {
+      if (!p.managerId) return;
+      if (!map[p.managerId]) map[p.managerId] = [];
+      map[p.managerId].push(p.id);
+    });
+    return { v: 1, updatedAt: (data && data.meta && data.meta.updatedAt) || Date.now(), map: map };
+  }
+
+  /** 중개사 데이터에 공개 배정표를 적용해 해제된 물건을 제거 */
+  function applyAssignmentFilter(data, agentId, assignDoc) {
+    if (!data || !agentId) return data;
+    var doc = assignDoc || window.__REMS_ASSIGN__;
+    if (!doc || !doc.map || !doc.map[agentId]) return data;
+    var allow = {};
+    doc.map[agentId].forEach(function (id) { allow[id] = true; });
+    data.properties = (data.properties || []).filter(function (p) { return allow[p.id]; });
+    if (!data.meta) data.meta = {};
+    data.meta.updatedAt = Math.max(data.meta.updatedAt || 0, doc.updatedAt || 0);
+    return data;
   }
 
   /** 소유자 데이터에서 중개사별 배정 물건만 담은 암호문 배열 생성 */
@@ -110,8 +147,10 @@ window.REMSSync = (function () {
   /** 중개사 배정 암호문만 클라우드에 올림 (Pages 재배포 없이 즉시 반영) */
   async function pushAccounts(data) {
     if (window.__REMS_ROLE__ !== 'owner') throw new Error('소유자 계정에서만 업로드할 수 있습니다.');
-    var entries = await buildAccountEntries(data || Store.data);
+    var src = data || Store.data;
+    var entries = await buildAccountEntries(src);
     await putJsonFile(ACCOUNTS_API, entries, 'sync: 중개사 배정 갱신 (' + new Date().toLocaleString('ko-KR') + ')');
+    await putJsonFile(ASSIGN_API, buildAssignments(src), 'sync: 배정표 갱신 (' + new Date().toLocaleString('ko-KR') + ')');
     try { localStorage.setItem(LAST_ACCT_KEY, String(Date.now())); } catch (e) {}
   }
 
@@ -157,6 +196,8 @@ window.REMSSync = (function () {
   return {
     saveCreds: saveCreds, creds: creds, token: token,
     pullDecrypt: pullDecrypt, pullAccountsList: pullAccountsList,
+    pullAssignments: pullAssignments, buildAssignments: buildAssignments,
+    applyAssignmentFilter: applyAssignmentFilter,
     buildAccountEntries: buildAccountEntries, pushAccounts: pushAccounts,
     push: push, schedulePush: schedulePush, updateTag: updateTag,
   };
