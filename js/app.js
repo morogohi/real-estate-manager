@@ -239,11 +239,49 @@ function buildFilters() {
   }
 }
 
+function managerOptionsHtml(selectedId) {
+  const accts = Store.data.accounts || [];
+  return '<option value="">— 미지정 —</option>' +
+    accts.map(a =>
+      `<option value="${a.id}" ${a.id === selectedId ? 'selected' : ''}>${a.name || a.id}</option>`
+    ).join('');
+}
+
+function setManager(propId, managerId, { silent } = {}) {
+  const p = Store.data.properties.find(x => x.id === Number(propId));
+  if (!p) return false;
+  const next = managerId || '';
+  if (p.managerId === next) return false;
+  p.managerId = next;
+  Store.save();
+  if (!silent) {
+    const msg = next
+      ? `'${propLabel(p)}' → ${managerName(next)} 지정`
+      : `'${propLabel(p)}' 배정 해제`;
+    const tip = (Store.data.accounts || []).length
+      ? ' (중개사 로그인 반영은 계정 관리에서 로그인 파일 재생성 후 배포)'
+      : '';
+    const el = $('#mgrBulkMsg');
+    if (el) el.textContent = msg + tip;
+  }
+  return true;
+}
+
 function renderProperties() {
   buildFilters();
   const ft = $('#filterType').value, fo = $('#filterOwner').value,
         fr = $('#filterRental').value, fs = $('#filterSearch').value.trim(),
         fm = $('#filterManager') ? $('#filterManager').value : '';
+
+  // 일괄 배정용 중개사 목록
+  const bm = $('#bulkManager');
+  if (bm) {
+    const cur = bm.value;
+    bm.innerHTML = '<option value="">— 중개사 선택 —</option>' +
+      (Store.data.accounts || []).map(a =>
+        `<option value="${a.id}">${a.name || a.id}</option>`).join('');
+    bm.value = cur;
+  }
 
   const rows = visibleProps().filter(p =>
     (!ft || p.type === ft) &&
@@ -253,8 +291,10 @@ function renderProperties() {
     (!fs || (p.address + ' ' + p.unit).includes(fs))
   );
 
+  const isOwner = window.__REMS_ROLE__ === 'owner' && !currentViewAs();
   $('#propTable tbody').innerHTML = rows.map(p => `
-    <tr>
+    <tr data-propid="${p.id}">
+      <td class="owner-only"><input type="checkbox" class="mgr-check" data-id="${p.id}"></td>
       <td>${p.id}</td>
       <td>${p.owner}</td>
       <td>${typeBadge(p.type)}</td>
@@ -262,20 +302,63 @@ function renderProperties() {
       <td>${p.acquireYear ? p.acquireYear + '년' : '-'}</td>
       <td class="addr">${p.address}<span class="map-mini" data-mapid="${p.id}">지도</span></td>
       <td>${p.unit || '-'}</td>
-      <td class="owner-only">${managerName(p.managerId) || '<span class="muted-sm">미지정</span>'}</td>
+      <td class="owner-only">${isOwner
+        ? `<select class="mgr-pick" data-mgr="${p.id}" title="중개사 지정 또는 미지정으로 해제">${managerOptionsHtml(p.managerId)}</select>`
+        : (managerName(p.managerId) || '<span class="muted-sm">미지정</span>')}</td>
       <td>${p.lease ? p.lease.end : '-'}</td>
       <td>${ddayBadge(p.lease ? ddayOf(p.lease.end) : null)}</td>
       <td><button class="link-btn" onclick="openModal(${p.id})">상세</button></td>
     </tr>`).join('') ||
-    '<tr><td colspan="11" class="empty">조건에 맞는 물건이 없습니다.</td></tr>';
+    '<tr><td colspan="12" class="empty">조건에 맞는 물건이 없습니다.</td></tr>';
+
+  const all = $('#mgrSelectAll');
+  if (all) all.checked = false;
 }
 
-// 목록의 '지도' 빠른 링크 (카카오맵)
+// 목록: 지도 링크 / 중개사 지정·해제
 $('#propTable').addEventListener('click', e => {
   const id = e.target.dataset.mapid;
   if (id == null) return;
   const p = Store.data.properties.find(x => x.id === Number(id));
   if (p) openExternal(mapServices(p.address, p.unit)[0].url);
+});
+$('#propTable').addEventListener('change', e => {
+  const pick = e.target.closest('.mgr-pick');
+  if (pick) {
+    setManager(pick.dataset.mgr, pick.value);
+    // 필터가 '특정 중개사'면 목록 갱신으로 빠져 나간 행 반영
+    if ($('#filterManager')?.value) renderProperties();
+    return;
+  }
+});
+
+$('#mgrSelectAll')?.addEventListener('change', e => {
+  $$('#propTable .mgr-check').forEach(c => { c.checked = e.target.checked; });
+});
+
+function selectedPropIds() {
+  return $$('#propTable .mgr-check:checked').map(c => Number(c.dataset.id));
+}
+
+$('#btnBulkAssign')?.addEventListener('click', () => {
+  const ids = selectedPropIds();
+  const mid = $('#bulkManager').value;
+  if (!ids.length) { alert('지정할 물건을 목록에서 선택해주세요.'); return; }
+  if (!mid) { alert('지정할 중개사를 선택해주세요.'); return; }
+  if (!confirm(`선택 ${ids.length}건을 '${managerName(mid)}'에게 지정할까요?`)) return;
+  ids.forEach(id => setManager(id, mid, { silent: true }));
+  $('#mgrBulkMsg').textContent =
+    `${ids.length}건 → ${managerName(mid)} 지정 완료 (중개사 로그인 반영은 계정 관리에서 로그인 파일 재생성)`;
+  renderProperties();
+});
+
+$('#btnBulkUnassign')?.addEventListener('click', () => {
+  const ids = selectedPropIds();
+  if (!ids.length) { alert('배정을 해제할 물건을 선택해주세요.'); return; }
+  if (!confirm(`선택 ${ids.length}건의 중개사 배정을 해제할까요?`)) return;
+  ids.forEach(id => setManager(id, '', { silent: true }));
+  $('#mgrBulkMsg').textContent = `${ids.length}건 배정 해제 완료`;
+  renderProperties();
 });
 
 ['filterType', 'filterOwner', 'filterRental', 'filterManager'].forEach(id =>
@@ -411,7 +494,7 @@ function openModal(id) {
   $('#mAcquirePrice').value = p?.acquirePrice ? fmt(p.acquirePrice) : '';
 
   // 관리 공인중개사 선택지
-  $('#mManager').innerHTML = '<option value="">— 미지정 —</option>' +
+  $('#mManager').innerHTML = '<option value="">— 미지정 (배정 해제) —</option>' +
     (Store.data.accounts || []).map(a =>
       `<option value="${a.id}">${a.name ? `${a.name} (${a.id})` : a.id}</option>`).join('');
   $('#mManager').value = p?.managerId || '';

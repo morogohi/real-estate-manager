@@ -7,7 +7,7 @@
 <title>부동산 통합 관리 시스템</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=216">
+<link rel="stylesheet" href="css/style.css?v=217">
 </head>
 <body>
 
@@ -96,12 +96,20 @@
         <select id="filterManager" class="owner-only"><option value="">전체 중개사</option></select>
         <input type="search" id="filterSearch" placeholder="주소·동호수 검색">
       </div>
+      <div class="mgr-bulk owner-only" id="mgrBulkBar">
+        <label class="check inline"><input type="checkbox" id="mgrSelectAll"> 전체 선택</label>
+        <select id="bulkManager"><option value="">— 중개사 선택 —</option></select>
+        <button class="btn btn-primary btn-sm" id="btnBulkAssign">선택 물건에 지정</button>
+        <button class="btn btn-ghost btn-sm" id="btnBulkUnassign">선택 물건 배정 해제</button>
+        <span class="hint" id="mgrBulkMsg"></span>
+      </div>
       <div class="table-wrap">
         <table class="table" id="propTable">
           <thead>
             <tr>
+              <th class="owner-only" style="width:36px"></th>
               <th>#</th><th>소유자</th><th>유형</th><th>임대유형</th><th>취득</th>
-              <th>주소</th><th>동호수</th><th class="owner-only">관리 중개사</th><th>계약만기</th><th>D-day</th><th></th>
+              <th>주소</th><th>동호수</th><th class="owner-only">관리 중개사 (지정·해제)</th><th>계약만기</th><th>D-day</th><th></th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -333,8 +341,8 @@
       <label>동호수 <input type="text" id="mUnit"></label>
       <label class="wide">주소 <input type="text" id="mAddress"></label>
       <label class="wide">메모 <input type="text" id="mMemo"></label>
-      <label class="wide owner-only">관리 공인중개사
-        <select id="mManager"><option value="">— 미지정 —</option></select>
+      <label class="wide owner-only">관리 공인중개사 (지정 / 미지정=해제)
+        <select id="mManager"><option value="">— 미지정 (배정 해제) —</option></select>
       </label>
     </div>
 
@@ -368,11 +376,52 @@
       <label>월세(원) <input type="text" id="mMonthly" class="num"></label>
       <label>임차인 성명 <input type="text" id="mTenant"></label>
       <label>임차인 연락처 <input type="text" id="mTenantPhone"></label>
-      <label class="check"><input type="checkbox" id="mInsJoined"> 보증보험 가입</label>
-      <label>보증보험 가입기간 <input type="text" id="mInsPeriod" placeholder="예: 23.05~24.05"></label>
-      <label>보증보험 수수료(원) <input type="text" id="mInsFee" class="num"></label>
-      <label>임차인 부담분(25%)(원) <input type="text" id="mInsTenantShare" class="num"></label>
+
+      <label>보증보험
+        <select id="mInsStatus">
+          <option value="no">미가입</option>
+          <option value="yes">가입</option>
+        </select>
+      </label>
+      <label class="ins-yes">보증 범위
+        <select id="mInsCoverage">
+          <option value="full">전액보증</option>
+          <option value="partial">일부보증</option>
+        </select>
+      </label>
+      <label class="ins-yes">보증보험사
+        <select id="mInsCompany">
+          <option value="">— 선택 —</option>
+          <option>HUG 주택도시보증공사</option>
+          <option>SGI 서울보증</option>
+          <option>HF 한국주택금융공사</option>
+          <option>기타</option>
+        </select>
+      </label>
+      <label class="ins-yes">보증보험 가입기간 <input type="text" id="mInsPeriod" placeholder="예: 23.05~24.05"></label>
+      <label class="ins-yes">보증보험 수수료(원) <input type="text" id="mInsFee" class="num"></label>
+      <label class="ins-yes">임차인 부담분(25%)(원) <input type="text" id="mInsTenantShare" class="num"></label>
+      <label class="ins-no wide">미가입 사유 (민간임대주택법 제49조 근거)
+        <select id="mInsReason">
+          <option value="">— 선택 —</option>
+          <option>보증금이 최우선변제금액 이하 + 임차인 미가입 동의(제49조⑦1호)</option>
+          <option>임차인이 전세금 반환보증 가입 + 임대인 수수료 부담(제49조⑦2호)</option>
+          <option>공공주택사업자(LH·지방공사 등)와 임대차계약</option>
+          <option>등록임대주택 아님 (보증 가입 의무 대상 아님)</option>
+          <option>가입 심사 거절 (보증회사 인수 거부)</option>
+          <option>기타 (메모 기재)</option>
+        </select>
+      </label>
+      <label class="wide">보증보험 메모 <input type="text" id="mInsNote" placeholder="미가입 사유 상세, 동의서 징구 여부, 특약 내용 등"></label>
     </div>
+
+    <h3>📎 계약·보증 서류 보관함 <span class="hint" style="font-weight:400">(보증보험증권 · 표준임대차계약서 · 미가입 동의서 등 PDF/이미지)</span></h3>
+    <div class="form-row">
+      <input type="file" id="mFileInput" accept=".pdf,.jpg,.jpeg,.png" multiple style="flex:1">
+    </div>
+    <div id="mFileList"></div>
+    <p class="hint">파일은 이 기기의 브라우저 내장 DB에 저장됩니다(외부 전송 없음). 다른 기기에서는 보이지 않으니 원본은 별도 보관하세요.</p>
+
     <div class="modal-actions">
       <button class="btn btn-ghost" id="btnModalCancel">닫기</button>
       <button class="btn danger btn-ghost hidden owner-only" id="btnModalDelete">삭제</button>
@@ -463,14 +512,14 @@
   </div>
 </div>
 
-<script src="js/crypto-util.js?v=216"></script>
-<script src="js/db.js?v=216"></script>
-<script src="js/data.js?v=216"></script>
-<script src="js/sync.js?v=216"></script>
-<script src="js/data.enc.js?v=216"></script>
-<script src="js/accounts.enc.js?v=216"></script>
-<script src="js/auth.js?v=216"></script>
-<script src="js/tax.js?v=216"></script>
-<script src="js/app.js?v=216"></script>
+<script src="js/crypto-util.js?v=217"></script>
+<script src="js/db.js?v=217"></script>
+<script src="js/data.js?v=217"></script>
+<script src="js/sync.js?v=217"></script>
+<script src="js/data.enc.js?v=217"></script>
+<script src="js/accounts.enc.js?v=217"></script>
+<script src="js/auth.js?v=217"></script>
+<script src="js/tax.js?v=217"></script>
+<script src="js/app.js?v=217"></script>
 </body>
 </html>

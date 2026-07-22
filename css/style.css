@@ -178,6 +178,22 @@ h3 { font-size: 15px; margin: 14px 0 10px; }
 }
 .filters input[type=search] { flex: 1; min-width: 200px; }
 
+/* 관리자: 중개사 일괄 지정/해제 */
+.mgr-bulk {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: -4px 0 14px; padding: 10px 12px;
+  background: #f0f5ff; border: 1px solid #d4e2fb; border-radius: 10px;
+}
+.mgr-bulk select {
+  min-width: 180px; padding: 7px 10px; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 13px; background: #fff; font-family: inherit;
+}
+.mgr-pick {
+  max-width: 170px; padding: 5px 8px; border: 1px solid var(--border);
+  border-radius: 6px; font-size: 12px; background: #fff; font-family: inherit;
+}
+.mgr-pick:focus { border-color: var(--primary); outline: none; }
+
 /* ===== 페이지 헤더 ===== */
 .page-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
 .page-head h1 { margin: 0; }
