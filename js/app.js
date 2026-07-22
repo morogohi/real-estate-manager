@@ -254,13 +254,28 @@ function setManager(propId, managerId, { silent } = {}) {
   if (p.managerId === next) return false;
   p.managerId = next;
   Store.save();
+  // 중개사 로그인용 배정 암호문을 즉시 클라우드에 반영 (토큰 있을 때)
+  if (window.REMSSync && REMSSync.token && REMSSync.token()) {
+    clearTimeout(window.__remsAcctTimer);
+    window.__remsAcctTimer = setTimeout(() => {
+      REMSSync.pushAccounts(Store.data)
+        .then(() => {
+          const el = $('#mgrBulkMsg');
+          if (el) el.textContent = (el.textContent || '') + ' ✓ 중개사 배정 클라우드 반영됨';
+        })
+        .catch(err => {
+          const el = $('#mgrBulkMsg');
+          if (el) el.textContent = `배정 저장됨 · 클라우드 반영 실패: ${err.message}`;
+        });
+    }, 1500);
+  }
   if (!silent) {
     const msg = next
       ? `'${propLabel(p)}' → ${managerName(next)} 지정`
       : `'${propLabel(p)}' 배정 해제`;
-    const tip = (Store.data.accounts || []).length
-      ? ' (중개사 로그인 반영은 계정 관리에서 로그인 파일 재생성 후 배포)'
-      : '';
+    const tip = REMSSync.token && REMSSync.token()
+      ? ' · 클라우드 배정 반영 중…'
+      : ' · ⚠️ 동기화 토큰 없으면 중개사 로그인에 즉시 반영 안 됨(☁️ 클라우드 동기화에서 토큰 등록)';
     const el = $('#mgrBulkMsg');
     if (el) el.textContent = msg + tip;
   }
@@ -348,7 +363,8 @@ $('#btnBulkAssign')?.addEventListener('click', () => {
   if (!confirm(`선택 ${ids.length}건을 '${managerName(mid)}'에게 지정할까요?`)) return;
   ids.forEach(id => setManager(id, mid, { silent: true }));
   $('#mgrBulkMsg').textContent =
-    `${ids.length}건 → ${managerName(mid)} 지정 완료 (중개사 로그인 반영은 계정 관리에서 로그인 파일 재생성)`;
+    `${ids.length}건 → ${managerName(mid)} 지정 완료` +
+    (REMSSync.token && REMSSync.token() ? ' · 클라우드 배정 자동 반영 예정' : ' · ⚠️ 동기화 토큰 등록 필요');
   renderProperties();
 });
 
@@ -357,7 +373,9 @@ $('#btnBulkUnassign')?.addEventListener('click', () => {
   if (!ids.length) { alert('배정을 해제할 물건을 선택해주세요.'); return; }
   if (!confirm(`선택 ${ids.length}건의 중개사 배정을 해제할까요?`)) return;
   ids.forEach(id => setManager(id, '', { silent: true }));
-  $('#mgrBulkMsg').textContent = `${ids.length}건 배정 해제 완료`;
+  $('#mgrBulkMsg').textContent =
+    `${ids.length}건 배정 해제 완료` +
+    (REMSSync.token && REMSSync.token() ? ' · 클라우드 배정 자동 반영 예정' : ' · ⚠️ 동기화 토큰 등록 필요');
   renderProperties();
 });
 
@@ -1138,22 +1156,21 @@ $('#btnGenAccounts').addEventListener('click', async () => {
   if (!accts.length) { acctMsg('등록된 중개사가 없습니다.', true); return; }
   acctMsg('생성 중…');
   try {
-    const entries = [];
-    for (const a of accts) {
-      if (!a.id || !a.pw) { acctMsg(`아이디/비밀번호 누락: ${a.id || '(빈 아이디)'}`, true); return; }
-      const subset = {
-        business: Store.data.business,
-        properties: Store.data.properties.filter(p => p.managerId === a.id),
-        todos: [],
-        accounts: [],
-        settings: { kakaoKey: '', deemedRate: Store.data.settings?.deemedRate ?? 3.5 },
-      };
-      entries.push(await REMSCrypto.encryptJSON(a.id, a.pw, subset));
-    }
+    const entries = await REMSSync.buildAccountEntries(Store.data);
     downloadText('accounts.enc.js',
       '/* 공인중개사 로그인용 암호문 (자동 생성). js/accounts.enc.js 에 덮어쓰고 배포하세요. */\n' +
       'window.__REMS_ACCOUNTS__ = ' + JSON.stringify(entries) + ';\n');
-    acctMsg(`완료: 중개사 ${entries.length}명 파일 생성. 다운로드한 accounts.enc.js를 js/ 폴더에 올려 배포하세요.`);
+    // 클라우드에도 즉시 올려 중개사 로그인에 바로 반영
+    if (REMSSync.token()) {
+      try {
+        await REMSSync.pushAccounts(Store.data);
+        acctMsg(`완료: 파일 다운로드 + 클라우드 배정 반영(${entries.length}명). 중개사는 재로그인하면 최신 배정만 보입니다.`);
+      } catch (e2) {
+        acctMsg(`파일은 생성됨. 클라우드 업로드 실패: ${e2.message}`, true);
+      }
+    } else {
+      acctMsg(`완료: accounts.enc.js 생성. 클라우드 토큰이 없으면 js/ 에 올려 배포하세요. (☁️ 동기화 토큰 등록 시 자동 반영)`);
+    }
   } catch (e) { acctMsg('생성 실패: ' + e.message, true); }
 });
 

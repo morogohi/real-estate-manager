@@ -1,9 +1,8 @@
 /* =========================================================
  * auth.js - 정적 사이트 로그인 게이트 (소유자 + 공인중개사 멀티계정)
- *  · 소유자: data.enc.js(__REMS_ENC__) 전체 데이터 복호화
- *  · 중개사: accounts.enc.js(__REMS_ACCOUNTS__) 중 본인 비밀번호로 풀리는
- *            "본인 배정 물건만" 담긴 암호문 복호화 → 다른 물건 접근 불가(암호학적 격리)
- *  · 아이디/비밀번호는 저장하지 않음(둘 다 키 재료)
+ *  · 소유자: data.enc.js(__REMS_ENC__) + 클라우드 sync 최신본
+ *  · 중개사: 클라우드 accounts.enc.json(배정 최신) → 없으면 배포 accounts.enc.js
+ *            로그인 시 항상 복호화된 "배정 물건만"으로 덮어씀 (옛 localStorage 잔존 방지)
  * ========================================================= */
 (function () {
   'use strict';
@@ -22,6 +21,17 @@
     document.body.classList.toggle('role-owner', role === 'owner');
   }
 
+  async function tryDecryptList(id, pw, list) {
+    if (!list || !list.length) return null;
+    for (var i = 0; i < list.length; i++) {
+      try {
+        var ta = await REMSCrypto.decryptToText(id, pw, list[i]);
+        return ta;
+      } catch (e) { /* 다음 */ }
+    }
+    return null;
+  }
+
   // 입력 계정으로 소유자/중개사 암호문을 차례로 시도 → {role, text} 또는 throw
   async function authenticate(id, pw) {
     if (window.__REMS_ENC__) {
@@ -30,14 +40,64 @@
         return { role: 'owner', text: t };
       } catch (e) { /* 다음 후보 */ }
     }
-    var list = window.__REMS_ACCOUNTS__ || [];
-    for (var i = 0; i < list.length; i++) {
+
+    // 중개사: 클라우드 최신 배정 → 배포 파일 순으로 시도
+    if (window.REMSSync && REMSSync.pullAccountsList) {
       try {
-        var ta = await REMSCrypto.decryptToText(id, pw, list[i]);
-        return { role: 'agent', text: ta };
-      } catch (e) { /* 다음 후보 */ }
+        var cloud = await REMSSync.pullAccountsList();
+        var tc = await tryDecryptList(id, pw, cloud);
+        if (tc) return { role: 'agent', text: tc };
+      } catch (e2) { /* 오프라인 등 */ }
     }
+    var ta = await tryDecryptList(id, pw, window.__REMS_ACCOUNTS__ || []);
+    if (ta) return { role: 'agent', text: ta };
+
     throw new Error('invalid');
+  }
+
+  /** 중개사: 항상 복호화본으로 properties 교체. 소유자: 후보 중 최신 */
+  async function resolveLoginData(role, id, pw, parsed) {
+    if (role === 'agent') {
+      // 배정 해제가 반영되도록 로컬에 남은 옛 물건 목록을 쓰지 않음
+      return parsed;
+    }
+    var candidates = [];
+    var ctx = await REMSCrypto.sha256hex(role + '|' + id);
+    if (localStorage.getItem(CTX_KEY) === ctx && localStorage.getItem(STORAGE_KEY)) {
+      try { candidates.push(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch (e) {}
+    }
+    candidates.push(parsed);
+    if (window.REMSSync) {
+      try {
+        var remote = await REMSSync.pullDecrypt(id, pw);
+        if (remote && remote.properties) candidates.push(remote);
+      } catch (e4) {}
+    }
+    var upAt = function (d) { return (d && d.meta && d.meta.updatedAt) || 0; };
+    return candidates.reduce(function (a, b) { return upAt(b) > upAt(a) ? b : a; });
+  }
+
+  async function refreshAgentFromCloud() {
+    if (!window.REMSSync || !REMSSync.creds) return;
+    var c = REMSSync.creds();
+    if (!c || sessionStorage.getItem(ROLE_KEY) !== 'agent') return;
+    try {
+      var cloud = await REMSSync.pullAccountsList();
+      var text = await tryDecryptList(c.id, c.pw, cloud);
+      if (!text) {
+        text = await tryDecryptList(c.id, c.pw, window.__REMS_ACCOUNTS__ || []);
+      }
+      if (!text) return;
+      var remote = JSON.parse(text);
+      if (!remote || !remote.properties) return;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
+      if (window.Store) {
+        Store.data = remote;
+        Store.migrate();
+        Store.save(false);
+        if (typeof renderAll === 'function') renderAll();
+      }
+    } catch (e) { /* 무시 */ }
   }
 
   function buildOverlay() {
@@ -72,23 +132,9 @@
         var parsed = JSON.parse(res.text);
         if (!parsed || !parsed.properties) throw new Error('bad');
 
-        // 후보(이 기기의 편집분 / 배포 파일 / 클라우드) 중 가장 최신 데이터 채택
+        msg.textContent = '데이터 확인 중…';
+        var best = await resolveLoginData(res.role, id, pw, parsed);
         var ctx = await REMSCrypto.sha256hex(res.role + '|' + id);
-        var sameCtx = localStorage.getItem(CTX_KEY) === ctx;
-        var candidates = [];
-        if (sameCtx && localStorage.getItem(STORAGE_KEY)) {
-          try { candidates.push(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch (e3) {}
-        }
-        candidates.push(parsed);
-        if (window.REMSSync) {
-          msg.textContent = '클라우드 확인 중…';
-          try {
-            var remote = await REMSSync.pullDecrypt(id, pw);
-            if (remote && remote.properties) candidates.push(remote);
-          } catch (e4) { /* 오프라인/네트워크 오류 시 로컬만 사용 */ }
-        }
-        var upAt = function (d) { return (d && d.meta && d.meta.updatedAt) || 0; };
-        var best = candidates.reduce(function (a, b) { return upAt(b) > upAt(a) ? b : a; });
         localStorage.setItem(STORAGE_KEY, JSON.stringify(best));
         localStorage.setItem(CTX_KEY, ctx);
         if (window.REMSSync) REMSSync.saveCreds(id, pw);
@@ -123,13 +169,15 @@
       else { lo.addEventListener('click', window.__remsLogout); }
     }
 
-    if (!GATE) { applyRole('owner'); return; } // 데스크톱: 전체 접근
+    if (!GATE) { applyRole('owner'); return; }
 
     if (sessionStorage.getItem(SESSION_KEY) === '1' && localStorage.getItem(STORAGE_KEY)) {
       applyRole(sessionStorage.getItem(ROLE_KEY) || 'owner');
       if (typeof window.__remsBoot === 'function') window.__remsBoot();
-      // 백그라운드로 클라우드 최신본 확인 (다른 기기에서 수정했을 수 있음)
-      if (window.REMSSync) {
+      // 중개사: 세션 유지 중이라도 클라우드 최신 배정으로 강제 갱신
+      if (sessionStorage.getItem(ROLE_KEY) === 'agent') {
+        refreshAgentFromCloud();
+      } else if (window.REMSSync) {
         var c = REMSSync.creds();
         if (c) {
           REMSSync.pullDecrypt(c.id, c.pw).then(function (remote) {
@@ -143,11 +191,11 @@
               if (window.Store && Store.data) {
                 Store.data = remote;
                 Store.migrate();
-                Store.save(false); // 내장 DB에도 반영
+                Store.save(false);
                 if (typeof renderAll === 'function') renderAll();
               }
             }
-          }).catch(function () { /* 오프라인이면 무시 */ });
+          }).catch(function () {});
         }
       }
       return;
