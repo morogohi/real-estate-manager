@@ -1424,11 +1424,40 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
   });
 }
 
+/** 관리자 로컬 배정이 클라우드와 다르면 즉시 업로드 (중개사 리스트 불일치 방지) */
+async function reconcileAssignmentsToCloud() {
+  if (window.__REMS_ROLE__ !== 'owner' || currentViewAs()) return;
+  if (!window.REMSSync || !REMSSync.token || !REMSSync.token()) return;
+  if (!REMSSync.creds || !REMSSync.creds()) return;
+  try {
+    const remote = await REMSSync.pullAssignments();
+    const local = REMSSync.buildAssignments(Store.data);
+    const rMap = (remote && remote.map) || {};
+    if (JSON.stringify(rMap) === JSON.stringify(local.map)) {
+      REMSSync.updateTag();
+      return;
+    }
+    REMSSync.updateTag('배정 클라우드 반영 중…');
+    await REMSSync.push();
+    const tip = $('#mgrBulkMsg');
+    if (tip) tip.textContent = '✓ 로컬 배정 해제가 클라우드(중개사 로그인)에 반영되었습니다. 중개사는 새로고침·재로그인하세요.';
+    REMSSync.updateTag();
+  } catch (err) {
+    REMSSync.updateTag('배정 반영 실패');
+    const tip = $('#mgrBulkMsg');
+    if (tip) tip.textContent = '배정 클라우드 반영 실패: ' + (err && err.message ? err.message : err);
+  }
+}
+
 /* 데스크톱(pywebview)에서는 API 준비 후, 브라우저에서는 즉시 시작 */
 let booted = false;
 function boot() {
   booted = true;
-  Store.load().then(renderAll);
+  Store.load().then(() => {
+    renderAll();
+    // 소유자: 로컬에서 해제한 배정이 중개사에 남아 있는 경우 자동 교정
+    reconcileAssignmentsToCloud();
+  });
 }
 
 /* 로그인 게이트(auth.js)가 활성화된 웹 환경에서는 인증 성공 후 boot() 호출 */

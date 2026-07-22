@@ -81,7 +81,20 @@
       } catch (e4) {}
     }
     var upAt = function (d) { return (d && d.meta && d.meta.updatedAt) || 0; };
-    return candidates.reduce(function (a, b) { return upAt(b) > upAt(a) ? b : a; });
+    var best = candidates.reduce(function (a, b) { return upAt(b) > upAt(a) ? b : a; });
+    // 소유자: 최신 데이터에 토큰이 없어도 다른 후보(클라우드 등)에 있으면 이어 붙임
+    // → 배정 해제 후 중개사 클라우드 반영이 끊기지 않도록
+    if (role === 'owner') {
+      var tok = '';
+      candidates.forEach(function (d) {
+        if (d && d.settings && d.settings.ghToken) tok = d.settings.ghToken;
+      });
+      if (tok) {
+        best.settings = best.settings || {};
+        best.settings.ghToken = tok;
+      }
+    }
+    return best;
   }
 
   async function refreshAgentFromCloud() {
@@ -196,14 +209,23 @@
             try { local = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (e) {}
             var lu = (local.meta && local.meta.updatedAt) || 0;
             var ru = (remote.meta && remote.meta.updatedAt) || 0;
-            if (ru > lu) {
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
-              if (window.Store && Store.data) {
-                Store.data = remote;
-                Store.migrate();
-                Store.save(false);
-                if (typeof renderAll === 'function') renderAll();
-              }
+            var tok = (remote.settings && remote.settings.ghToken)
+              || (local.settings && local.settings.ghToken) || '';
+            // 로컬이 더 최신(배정 해제 등)이면 로컬 유지 — 토큰만 클라우드에서 보강
+            var best = (ru > lu) ? remote : local;
+            if (tok) {
+              best.settings = best.settings || {};
+              best.settings.ghToken = tok;
+            }
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(best));
+            if (window.Store && Store.data) {
+              Store.data = best;
+              Store.migrate();
+              Store.save(false);
+              if (typeof renderAll === 'function') renderAll();
+            }
+            if (typeof reconcileAssignmentsToCloud === 'function') {
+              reconcileAssignmentsToCloud();
             }
           }).catch(function () {});
         }
