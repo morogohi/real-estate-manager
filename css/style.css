@@ -259,3 +259,119 @@ hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 .map-box { width: 100%; height: 300px; border: 1px solid var(--border); border-radius: 10px; margin-top: 10px; overflow: hidden; }
 .map-mini { color: var(--primary); cursor: pointer; font-size: 12px; margin-left: 6px; }
 .map-mini:hover { text-decoration: underline; }
+
+/* ===== 모바일 메뉴 토글 (데스크톱에선 숨김) ===== */
+.menu-toggle {
+  display: none; margin-left: auto; background: transparent; border: 1px solid #3d4f76;
+  color: #c0cde6; border-radius: 8px; font-size: 18px; line-height: 1;
+  padding: 8px 12px; cursor: pointer;
+}
+.menu-toggle:active { background: #1d2b4a; }
+
+/* =========================================================
+ * 반응형: 태블릿 (~1180px) — 13인치 태블릿·좁은 노트북
+ * ========================================================= */
+@media (max-width: 1180px) {
+  .main { padding: 20px 22px; }
+  .sidebar { width: 200px; padding: 16px 10px; }
+  .table .addr { max-width: 200px; }
+}
+
+/* =========================================================
+ * 반응형: 모바일·세로 태블릿 (~900px)
+ *  · 사이드바 → 상단 고정바(브랜드 + ☰) + 가로 스크롤 탭
+ *  · 하단 유틸 버튼(백업·계정관리 등)은 ☰ 토글로 표시
+ * ========================================================= */
+@media (max-width: 900px) {
+  .layout { flex-direction: column; }
+
+  .sidebar {
+    width: 100%; height: auto; position: sticky; top: 0; z-index: 50;
+    padding: 10px 12px 8px;
+    box-shadow: 0 2px 10px rgba(10, 20, 45, .25);
+  }
+  .brand { padding: 2px 2px 8px; border-bottom: none; }
+  .brand-icon { font-size: 22px; }
+  .brand-title { font-size: 15px; }
+  .brand-sub { display: none; }
+  .menu-toggle { display: block; }
+
+  .nav {
+    flex-direction: row; flex: none; margin-top: 2px; gap: 6px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; padding-bottom: 2px;
+  }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-item { flex: 0 0 auto; white-space: nowrap; padding: 9px 13px; font-size: 13px; }
+
+  .sidebar-footer { display: none; }
+  .sidebar.menu-open .sidebar-footer {
+    display: flex; margin-top: 8px; padding-top: 10px;
+    border-top: 1px solid #2a3a5c;
+  }
+  .sidebar-footer .btn { padding: 11px 12px; font-size: 13px; }
+
+  .main { padding: 14px 14px 40px; max-width: 100%; }
+  h1 { font-size: 20px; margin-bottom: 14px; }
+
+  .page-head { flex-wrap: wrap; gap: 10px; }
+  .cards { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+  .card { padding: 14px; }
+  .card .value { font-size: 21px; }
+
+  /* 표는 화면 안에서 가로 스크롤 (열 찌그러짐 방지) */
+  .table-wrap { -webkit-overflow-scrolling: touch; }
+  #propTable { min-width: 860px; }
+  #leaseTable { min-width: 780px; }
+  #incomeTable { min-width: 760px; }
+  .table th, .table td { padding: 9px 10px; }
+
+  .tax-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tax-tabs::-webkit-scrollbar { display: none; }
+  .tax-tab { flex: 0 0 auto; white-space: nowrap; }
+
+  /* iOS 사파리 자동 확대 방지: 입력 폰트 16px 이상 */
+  input, select, textarea, .auth-input { font-size: 16px; }
+
+  .filters select, .filters input { flex: 1 1 45%; min-width: 0; }
+  .filters input[type=search] { flex: 1 1 100%; }
+
+  /* 터치 타깃 확보 */
+  .btn { padding: 11px 16px; }
+  .btn-sm { padding: 9px 12px; }
+  .map-chip { padding: 9px 13px; }
+}
+
+/* =========================================================
+ * 반응형: 스마트폰 (~560px)
+ * ========================================================= */
+@media (max-width: 560px) {
+  .main { padding: 12px 10px 48px; }
+  .panel { padding: 14px; }
+  .grid-2 { gap: 12px; }
+
+  .form-grid { grid-template-columns: 1fr; }
+  .form-grid label.check { padding-top: 4px; }
+  .form-row { flex-direction: column; align-items: stretch; }
+  .form-row label { min-width: 0; }
+  .form-row .btn { width: 100%; }
+
+  .page-head h1 { font-size: 19px; }
+  .page-head > div { width: 100%; }
+  .page-head .btn { flex: 1; }
+
+  /* 모달: 하단 시트 형태로 전체 화면 활용 */
+  .modal-bg { padding: 0; align-items: flex-end; }
+  .modal {
+    width: 100%; max-height: 94dvh; border-radius: 16px 16px 0 0;
+    padding: 18px 14px calc(16px + env(safe-area-inset-bottom));
+  }
+  .modal-actions { position: sticky; bottom: 0; background: var(--panel); padding-top: 10px; }
+  .modal-actions .btn { flex: 1; }
+  .map-box { height: 220px; }
+
+  .acct-add { flex-direction: column; }
+  .acct-add input { width: 100%; }
+
+  .auth-card { padding: 26px 20px 20px; }
+}

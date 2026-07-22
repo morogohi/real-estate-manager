@@ -95,7 +95,14 @@ $$('.nav-item').forEach(btn => {
     btn.classList.add('active');
     $$('.tab').forEach(t => t.classList.add('hidden'));
     $(`#tab-${btn.dataset.tab}`).classList.remove('hidden');
+    document.querySelector('.sidebar')?.classList.remove('menu-open');
+    window.scrollTo({ top: 0 });
   });
+});
+
+/* 모바일: 상단바 ☰ 로 유틸 메뉴(백업·계정관리 등) 토글 */
+$('#btnMenuToggle')?.addEventListener('click', () => {
+  document.querySelector('.sidebar').classList.toggle('menu-open');
 });
 
 $$('.tax-tab').forEach(btn => {
