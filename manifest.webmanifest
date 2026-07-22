@@ -1,0 +1,15 @@
+{
+  "name": "부동산 통합 관리 시스템",
+  "short_name": "부동산관리",
+  "description": "물건·임대차·세금 통합관리",
+  "lang": "ko",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#111c33",
+  "theme_color": "#111c33",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

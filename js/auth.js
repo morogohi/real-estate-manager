@@ -72,12 +72,26 @@
         var parsed = JSON.parse(res.text);
         if (!parsed || !parsed.properties) throw new Error('bad');
 
-        // 계정(역할+아이디) 컨텍스트가 바뀌면 새 데이터로 교체, 같으면 기존 편집분 유지
+        // 후보(이 기기의 편집분 / 배포 파일 / 클라우드) 중 가장 최신 데이터 채택
         var ctx = await REMSCrypto.sha256hex(res.role + '|' + id);
-        if (localStorage.getItem(CTX_KEY) !== ctx || !localStorage.getItem(STORAGE_KEY)) {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-          localStorage.setItem(CTX_KEY, ctx);
+        var sameCtx = localStorage.getItem(CTX_KEY) === ctx;
+        var candidates = [];
+        if (sameCtx && localStorage.getItem(STORAGE_KEY)) {
+          try { candidates.push(JSON.parse(localStorage.getItem(STORAGE_KEY))); } catch (e3) {}
         }
+        candidates.push(parsed);
+        if (window.REMSSync) {
+          msg.textContent = '클라우드 확인 중…';
+          try {
+            var remote = await REMSSync.pullDecrypt(id, pw);
+            if (remote && remote.properties) candidates.push(remote);
+          } catch (e4) { /* 오프라인/네트워크 오류 시 로컬만 사용 */ }
+        }
+        var upAt = function (d) { return (d && d.meta && d.meta.updatedAt) || 0; };
+        var best = candidates.reduce(function (a, b) { return upAt(b) > upAt(a) ? b : a; });
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(best));
+        localStorage.setItem(CTX_KEY, ctx);
+        if (window.REMSSync) REMSSync.saveCreds(id, pw);
         try { localStorage.removeItem('rems_data_v1'); } catch (e2) {}
 
         sessionStorage.setItem(SESSION_KEY, '1');
@@ -113,6 +127,27 @@
     if (sessionStorage.getItem(SESSION_KEY) === '1' && localStorage.getItem(STORAGE_KEY)) {
       applyRole(sessionStorage.getItem(ROLE_KEY) || 'owner');
       if (typeof window.__remsBoot === 'function') window.__remsBoot();
+      // 백그라운드로 클라우드 최신본 확인 (다른 기기에서 수정했을 수 있음)
+      if (window.REMSSync) {
+        var c = REMSSync.creds();
+        if (c) {
+          REMSSync.pullDecrypt(c.id, c.pw).then(function (remote) {
+            if (!remote || !remote.properties) return;
+            var local = {};
+            try { local = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch (e) {}
+            var lu = (local.meta && local.meta.updatedAt) || 0;
+            var ru = (remote.meta && remote.meta.updatedAt) || 0;
+            if (ru > lu) {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
+              if (window.Store && Store.data) {
+                Store.data = remote;
+                Store.migrate();
+                if (typeof renderAll === 'function') renderAll();
+              }
+            }
+          }).catch(function () { /* 오프라인이면 무시 */ });
+        }
+      }
       return;
     }
 

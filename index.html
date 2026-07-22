@@ -3,8 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#111c33">
 <title>부동산 통합 관리 시스템</title>
-<link rel="stylesheet" href="css/style.css?v=212">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/style.css?v=213">
 </head>
 <body>
 
@@ -32,11 +35,14 @@
 
     <div class="sidebar-footer">
       <button class="btn btn-ghost btn-sm owner-only" id="btnAccounts">👤 중개사 계정 관리</button>
+      <button class="btn btn-ghost btn-sm owner-only" id="btnSync">☁️ 클라우드 동기화</button>
+      <button class="btn btn-ghost btn-sm" id="btnSnapshots">🕘 변경 이력 복구</button>
       <button class="btn btn-ghost btn-sm" id="btnExport">데이터 백업(JSON)</button>
       <label class="btn btn-ghost btn-sm owner-only" for="fileImport">백업 불러오기</label>
       <input type="file" id="fileImport" accept=".json" hidden>
       <button class="btn btn-ghost btn-sm danger owner-only" id="btnReset">초기 데이터로 재설정</button>
       <button class="btn btn-ghost btn-sm" id="btnLogout">🔒 로그아웃</button>
+      <div class="role-tag" id="syncTag"></div>
       <div class="role-tag" id="roleTag"></div>
     </div>
   </aside>
@@ -102,7 +108,10 @@
     <section class="tab hidden" id="tab-leases">
       <div class="page-head">
         <h1>임대차 관리</h1>
-        <button class="btn btn-ghost" id="btnExportLeaseCsv">엑셀(CSV) 내보내기</button>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost" id="btnExportIcs">📅 만기 캘린더(ICS)</button>
+          <button class="btn btn-ghost" id="btnExportLeaseCsv">엑셀(CSV) 내보내기</button>
+        </div>
       </div>
       <div class="panel">
         <h2>📈 임대료 5% 증액 상한 계산</h2>
@@ -403,12 +412,59 @@
   </div>
 </div>
 
-<script src="js/crypto-util.js?v=212"></script>
-<script src="js/data.js?v=212"></script>
-<script src="js/data.enc.js?v=212"></script>
-<script src="js/accounts.enc.js?v=212"></script>
-<script src="js/auth.js?v=212"></script>
-<script src="js/tax.js?v=212"></script>
-<script src="js/app.js?v=212"></script>
+<!-- 클라우드 동기화 설정 모달 (소유자 전용) -->
+<div class="modal-bg hidden" id="syncModalBg">
+  <div class="modal">
+    <h2>☁️ 클라우드 동기화</h2>
+    <p class="hint">데이터를 <b>암호화한 상태로</b> GitHub 저장소(<code>data/sync.enc.json</code>)에 올려 PC·스마트폰·태블릿 간에 동기화합니다.
+    저장(수정) 후 몇 초 뒤 자동 업로드되며, 로그인할 때 클라우드의 최신본을 자동으로 내려받습니다.</p>
+
+    <div class="form-row" style="margin-top:10px">
+      <label style="flex:2">GitHub 토큰 (Contents: Read and write 권한)
+        <input type="password" id="syncToken" placeholder="github_pat_... 또는 ghp_...">
+      </label>
+      <button class="btn btn-primary" id="btnSaveToken">토큰 저장</button>
+    </div>
+    <p class="hint">발급: GitHub → Settings → Developer settings → <b>Fine-grained tokens</b> →
+      대상 저장소 <code>real-estate-manager</code>만 선택 → Repository permissions에서 <b>Contents: Read and write</b>만 부여.
+      토큰은 이 브라우저에만 저장되며 암호화 데이터에 포함돼 함께 동기화됩니다.</p>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+      <button class="btn btn-primary" id="btnSyncPush">지금 업로드</button>
+      <button class="btn btn-ghost" id="btnSyncPull">클라우드에서 내려받기</button>
+    </div>
+    <div class="acct-msg" id="syncMsg"></div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnSyncClose">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 변경 이력(스냅샷) 복구 모달 -->
+<div class="modal-bg hidden" id="snapModalBg">
+  <div class="modal">
+    <h2>🕘 변경 이력 복구</h2>
+    <p class="hint">데이터 수정 시 자동으로 남는 스냅샷(최근 10개)입니다. 실수로 삭제·재설정했을 때 이전 상태로 되돌릴 수 있습니다.</p>
+    <div class="table-wrap" style="margin-top:10px">
+      <table class="table" id="snapTable">
+        <thead><tr><th>시각</th><th>구분</th><th>물건수</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnSnapClose">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/crypto-util.js?v=213"></script>
+<script src="js/data.js?v=213"></script>
+<script src="js/sync.js?v=213"></script>
+<script src="js/data.enc.js?v=213"></script>
+<script src="js/accounts.enc.js?v=213"></script>
+<script src="js/auth.js?v=213"></script>
+<script src="js/tax.js?v=213"></script>
+<script src="js/app.js?v=213"></script>
 </body>
 </html>

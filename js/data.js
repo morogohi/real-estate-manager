@@ -3,6 +3,7 @@
  * ========================================================= */
 
 const STORAGE_KEY = 'rems_data_v3';
+const SNAPSHOT_KEY = 'rems_snapshots_v1';
 
 /* =========================================================
  * ⚠️ 공개 배포(웹 서비스)용 초기 데이터는 모두 "가상 샘플"입니다.
@@ -65,6 +66,8 @@ const Store = {
     if (d.settings.deemedRate == null) d.settings.deemedRate = 3.5;
     if (d.settings.kakaoKey == null) d.settings.kakaoKey = '';
     if (!Array.isArray(d.accounts)) d.accounts = []; // 공인중개사 계정
+    if (!d.meta) d.meta = { updatedAt: 0 };          // 동기화 비교용 수정 시각
+    if (d.settings.ghToken == null) d.settings.ghToken = ''; // 클라우드 동기화 토큰
     (d.properties || []).forEach(p => {
       if (p.acquirePrice == null) p.acquirePrice = 0;       // 취득가액
       if (p.acquireDate == null) p.acquireDate = '';         // 취득일(정확한 날짜)
@@ -87,16 +90,60 @@ const Store = {
     }
     this.data = loaded || this.seedData();
     this.migrate();
-    this.save();
+    this.save(false); // 단순 로드는 수정으로 취급하지 않음
   },
 
-  save() {
+  /**
+   * @param touch true(기본)면 사용자 수정으로 간주:
+   *              수정시각 갱신 + 자동 스냅샷 + 클라우드 업로드 예약
+   */
+  save(touch = true) {
+    if (touch && this.data) {
+      if (!this.data.meta) this.data.meta = {};
+      this.data.meta.updatedAt = Date.now();
+      this.autoSnapshot();
+    }
     const json = JSON.stringify(this.data);
     if (this.isDesktop()) {
       window.pywebview.api.save_data(JSON.stringify(this.data, null, 2));
     } else {
       localStorage.setItem(STORAGE_KEY, json);
     }
+    if (touch && window.REMSSync) REMSSync.schedulePush();
+  },
+
+  /* ---------- 자동 스냅샷 (실수 복구용, 브라우저 전용) ---------- */
+
+  listSnapshots() {
+    try { return JSON.parse(localStorage.getItem(SNAPSHOT_KEY) || '[]'); }
+    catch (e) { return []; }
+  },
+
+  /** 현재 데이터를 스냅샷으로 보관 (최대 10개) */
+  snapshot(label) {
+    if (this.isDesktop() || !this.data) return;
+    try {
+      const list = this.listSnapshots();
+      list.unshift({ t: Date.now(), label: label || '자동', json: JSON.stringify(this.data) });
+      localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(list.slice(0, 10)));
+    } catch (e) { /* 저장소 부족 시 무시 */ }
+  },
+
+  /** 30분에 1개꼴로만 자동 스냅샷을 남김 */
+  autoSnapshot() {
+    const list = this.listSnapshots();
+    if (list.length && Date.now() - list[0].t < 30 * 60 * 1000) return;
+    this.snapshot('자동');
+  },
+
+  restoreSnapshot(t) {
+    const s = this.listSnapshots().find(x => x.t === t);
+    if (!s) return false;
+    this.snapshot('복원 직전');
+    this.data = JSON.parse(s.json);
+    this.migrate();
+    this.save();
+    return true;
   },
 
   nextId(list) {
@@ -130,6 +177,7 @@ const Store = {
   },
 
   reset() {
+    this.snapshot('재설정 직전'); // 실수 복구용
     if (!this.isDesktop()) localStorage.removeItem(STORAGE_KEY);
     this.data = this.seedData();
     this.migrate();

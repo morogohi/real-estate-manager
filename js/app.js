@@ -765,6 +765,47 @@ $('#btnExportLeaseCsv').addEventListener('click', () => {
   downloadCsv('임대차현황', [head, ...rows]);
 });
 
+/* ---------- 계약 만기 캘린더(ICS) 내보내기 ---------- */
+
+function icsEscape(s) {
+  return String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+}
+
+$('#btnExportIcs').addEventListener('click', () => {
+  const leased = Store.data.properties.filter(p => p.lease && p.lease.end);
+  if (!leased.length) { alert('만기일이 입력된 임대차 계약이 없습니다.'); return; }
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
+  const ev = p => {
+    const d = p.lease.end.replace(/-/g, '');
+    const title = `[임대차 만기] ${propLabel(p)}`;
+    const desc = `임차인: ${p.lease.tenantName || '-'} / 보증금 ${fmt(p.lease.deposit)}원` +
+      (p.lease.monthlyRent ? ` / 월세 ${fmt(p.lease.monthlyRent)}원` : '') +
+      ` / 보증보험 ${p.lease.insurance?.joined ? '가입' : '미가입'}`;
+    return [
+      'BEGIN:VEVENT',
+      `UID:rems-lease-${p.id}-${d}@rems`,
+      `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${d}`,
+      `SUMMARY:${icsEscape(title)}`,
+      `DESCRIPTION:${icsEscape(desc)}`,
+      `LOCATION:${icsEscape(p.address + ' ' + (p.unit || ''))}`,
+      // 만기 60일·30일 전 알림
+      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape(title)} 60일 전`, 'TRIGGER:-P60D', 'END:VALARM',
+      'BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape(title)} 30일 전`, 'TRIGGER:-P30D', 'END:VALARM',
+      'END:VEVENT',
+    ].join('\r\n');
+  };
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//REMS//부동산관리//KO',
+    'X-WR-CALNAME:임대차 만기', ...leased.map(ev), 'END:VCALENDAR'].join('\r\n');
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `임대차만기_${new Date().toISOString().slice(0, 10)}.ics`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  alert(`계약 ${leased.length}건의 만기 일정을 내보냈습니다.\n스마트폰에서 이 파일을 열면 캘린더 앱에 등록되고, 60일·30일 전에 알림을 받습니다.`);
+});
+
 $('#fileImport').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
@@ -779,6 +820,105 @@ $('#btnReset').addEventListener('click', () => {
   if (!confirm('모든 변경사항이 사라지고 엑셀 기준 초기 데이터로 재설정됩니다. 계속하시겠습니까?')) return;
   Store.reset();
   renderAll();
+});
+
+/* =========================================================
+ * 클라우드 동기화 설정 (소유자 전용)
+ * ========================================================= */
+
+function syncMsg(text, isErr) {
+  const m = $('#syncMsg');
+  if (!m) return;
+  m.textContent = text || '';
+  m.style.color = isErr ? 'var(--danger)' : 'var(--ok)';
+}
+
+$('#btnSync').addEventListener('click', () => {
+  $('#syncToken').value = Store.data.settings?.ghToken || '';
+  syncMsg('');
+  $('#syncModalBg').classList.remove('hidden');
+});
+$('#btnSyncClose').addEventListener('click', () => $('#syncModalBg').classList.add('hidden'));
+$('#syncModalBg').addEventListener('click', e => {
+  if (e.target === $('#syncModalBg')) $('#syncModalBg').classList.add('hidden');
+});
+
+$('#btnSaveToken').addEventListener('click', () => {
+  Store.data.settings.ghToken = $('#syncToken').value.trim();
+  Store.save();
+  syncMsg(Store.data.settings.ghToken ? '토큰을 저장했습니다. 이제 수정하면 자동 업로드됩니다.' : '토큰을 삭제했습니다.');
+  REMSSync.updateTag();
+});
+
+$('#btnSyncPush').addEventListener('click', async () => {
+  syncMsg('업로드 중…');
+  try {
+    await REMSSync.push();
+    syncMsg('업로드 완료. 다른 기기에서 로그인하면 이 데이터를 받게 됩니다.');
+  } catch (e) { syncMsg(e.message, true); }
+});
+
+$('#btnSyncPull').addEventListener('click', async () => {
+  const c = REMSSync.creds();
+  if (!c) { syncMsg('세션에 로그인 정보가 없습니다. 로그아웃 후 다시 로그인해주세요.', true); return; }
+  syncMsg('내려받는 중…');
+  try {
+    const remote = await REMSSync.pullDecrypt(c.id, c.pw);
+    if (!remote || !remote.properties) { syncMsg('클라우드에 저장된 데이터가 아직 없습니다.', true); return; }
+    const lu = Store.data.meta?.updatedAt || 0;
+    const ru = remote.meta?.updatedAt || 0;
+    if (ru <= lu && !confirm('클라우드 데이터가 이 기기 데이터보다 오래되었습니다. 그래도 덮어쓸까요?')) {
+      syncMsg('취소했습니다.'); return;
+    }
+    Store.snapshot('클라우드 내려받기 직전');
+    Store.data = remote;
+    Store.migrate();
+    Store.save(false);
+    renderAll();
+    syncMsg('클라우드 데이터를 적용했습니다.');
+  } catch (e) { syncMsg('내려받기 실패: ' + e.message, true); }
+});
+
+/* =========================================================
+ * 변경 이력(스냅샷) 복구
+ * ========================================================= */
+
+function renderSnapshots() {
+  const list = Store.listSnapshots();
+  $('#snapTable tbody').innerHTML = list.length
+    ? list.map(s => {
+        let count = '-';
+        try { count = (JSON.parse(s.json).properties || []).length + '건'; } catch (e) {}
+        return `
+        <tr>
+          <td>${new Date(s.t).toLocaleString('ko-KR')}</td>
+          <td>${s.label || '자동'}</td>
+          <td>${count}</td>
+          <td><button class="link-btn" data-restore="${s.t}">이 시점으로 복원</button></td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="4" class="empty">저장된 스냅샷이 없습니다. 데이터를 수정하면 자동으로 쌓입니다.</td></tr>';
+}
+
+$('#btnSnapshots').addEventListener('click', () => {
+  renderSnapshots();
+  $('#snapModalBg').classList.remove('hidden');
+});
+$('#btnSnapClose').addEventListener('click', () => $('#snapModalBg').classList.add('hidden'));
+$('#snapModalBg').addEventListener('click', e => {
+  if (e.target === $('#snapModalBg')) $('#snapModalBg').classList.add('hidden');
+});
+$('#snapTable').addEventListener('click', e => {
+  const t = e.target.dataset.restore;
+  if (t == null) return;
+  if (!confirm('현재 데이터를 이 스냅샷 시점으로 되돌립니다. 계속할까요?\n(되돌리기 직전 상태도 스냅샷으로 보관됩니다)')) return;
+  if (Store.restoreSnapshot(Number(t))) {
+    renderAll();
+    $('#snapModalBg').classList.add('hidden');
+    alert('복원했습니다.');
+  } else {
+    alert('복원에 실패했습니다.');
+  }
 });
 
 /* =========================================================
@@ -990,6 +1130,14 @@ function renderAll() {
   renderTodos();
   populatePropPickers();
   renderIncome();
+  if (window.REMSSync) REMSSync.updateTag();
+}
+
+/* PWA: 서비스워커 등록 (홈 화면 설치·오프라인 열람) */
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
 }
 
 /* 데스크톱(pywebview)에서는 API 준비 후, 브라우저에서는 즉시 시작 */
