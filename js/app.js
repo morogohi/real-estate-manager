@@ -292,11 +292,13 @@ function renderKakaoPreview(addr) {
   box.classList.remove('hidden');
   box.innerHTML = '';
   const draw = () => {
-    if (!(window.kakao && window.kakao.maps && window.kakao.maps.services)) {
+    // autoload=false 방식에서는 services 모듈이 kakao.maps.load() 이후에 생성됨
+    if (!(window.kakao && window.kakao.maps && typeof window.kakao.maps.load === 'function')) {
       box.innerHTML = kakaoFailGuide();
       return;
     }
     kakao.maps.load(() => {
+      if (!kakao.maps.services) { box.innerHTML = kakaoFailGuide(); return; }
       const map = new kakao.maps.Map(box, { center: new kakao.maps.LatLng(37.5665, 126.9780), level: 3 });
       const geocoder = new kakao.maps.services.Geocoder();
       const place = new kakao.maps.services.Places();
