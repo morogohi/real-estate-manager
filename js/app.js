@@ -502,63 +502,142 @@ $('#btnSaveKakao').addEventListener('click', () => {
   alert('카카오맵 키를 저장했습니다.');
 });
 
-function openModal(id) {
-  const p = id ? Store.data.properties.find(x => x.id === id) : null;
-  $('#modalTitle').textContent = p ? `물건 #${p.id} 상세` : '새 물건 추가';
-  $('#mId').value = p ? p.id : '';
-  $('#mOwner').value = p?.owner || '';
-  $('#mType').value = p?.type || '오피스텔';
-  $('#mRentalType').value = p?.rentalType || '';
-  $('#mAcquireYear').value = p?.acquireYear || '';
-  $('#mRegDate').value = p?.regDate || '';
-  $('#mAddress').value = p?.address || '';
-  $('#mUnit').value = p?.unit || '';
-  $('#mMemo').value = p?.memo || '';
-  $('#mAcquireDate').value = p?.acquireDate || '';
-  $('#mAcquirePrice').value = p?.acquirePrice ? fmt(p.acquirePrice) : '';
-
-  // 관리 공인중개사 선택지
-  $('#mManager').innerHTML = '<option value="">— 미지정 (배정 해제) —</option>' +
-    (Store.data.accounts || []).map(a =>
-      `<option value="${a.id}">${a.name ? `${a.name} (${a.id})` : a.id}</option>`).join('');
-  $('#mManager').value = p?.managerId || '';
-
-  // 연도별 공시가격
-  modalPriceHistory = p ? (p.priceHistory || []).map(x => ({ ...x })) : [];
-  renderModalPrices();
-
-  // 지도/공부 링크
-  const addr = p?.address || '';
-  $('#mMapLinks').innerHTML = addr
-    ? mapServices(addr, p?.unit).map((s, i) =>
-        `<button type="button" class="map-chip" data-mapidx="${i}">${s.label}</button>`).join('')
-    : '<span class="hint">주소를 입력하고 저장하면 지도·공부 링크가 활성화됩니다.</span>';
-  modalMapAddr = addr; modalMapUnit = p?.unit || '';
-
-  // 카카오 지도 미리보기
-  $('#mKakaoKey').value = Store.data.settings?.kakaoKey || '';
-  renderKakaoPreview(addr);
-
-  const l = p?.lease;
-  $('#mHasLease').checked = !!l;
-  $('#mLeaseFields').style.display = l ? '' : 'none';
-  $('#mLeaseStart').value = l?.start || '';
-  $('#mLeaseEnd').value = l?.end || '';
-  $('#mDeposit').value = l?.deposit ? fmt(l.deposit) : '';
-  $('#mMonthly').value = l?.monthlyRent ? fmt(l.monthlyRent) : '';
-  $('#mTenant').value = l?.tenantName || '';
-  $('#mTenantPhone').value = l?.tenantPhone || '';
-  $('#mInsJoined').checked = !!l?.insurance?.joined;
-  $('#mInsPeriod').value = l?.insurance?.period || '';
-  $('#mInsFee').value = l?.insurance?.fee ? fmt(l.insurance.fee) : '';
-  $('#mInsTenantShare').value = l?.insurance?.tenantShare ? fmt(l.insurance.tenantShare) : '';
-
-  $('#btnModalDelete').classList.toggle('hidden', !p);
-  $('#modalBg').classList.remove('hidden');
+function syncInsFields() {
+  const joined = $('#mInsStatus')?.value === 'yes';
+  const box = $('#mLeaseFields');
+  if (!box) return;
+  box.classList.toggle('ins-joined', joined);
+  box.classList.toggle('ins-not', !joined);
 }
+
+function fmtBytes(n) {
+  if (n < 1024) return n + 'B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + 'KB';
+  return (n / 1048576).toFixed(1) + 'MB';
+}
+
+async function renderModalFiles(propId) {
+  const list = $('#mFileList');
+  if (!list) return;
+  if (!propId || !window.REMSDB) {
+    list.innerHTML = '<div class="empty">저장 후 서류를 첨부할 수 있습니다.</div>';
+    return;
+  }
+  const files = await REMSDB.listFiles(propId);
+  list.innerHTML = files.length
+    ? files.map(f => `
+      <div class="file-row">
+        <div class="grow" title="${f.name}">📄 ${f.name} <span class="muted-sm">(${fmtBytes(f.size)})</span></div>
+        <button type="button" class="link-btn" data-dlfile="${f.id}">열기</button>
+        <button type="button" class="link-btn" data-delfile="${f.id}" style="color:var(--danger)">삭제</button>
+      </div>`).join('')
+    : '<div class="empty">첨부된 서류가 없습니다.</div>';
+}
+
+function openModal(id) {
+  try {
+    const p = id ? Store.data.properties.find(x => x.id === id) : null;
+    $('#modalTitle').textContent = p ? `물건 #${p.id} 상세` : '새 물건 추가';
+    $('#mId').value = p ? p.id : '';
+    $('#mOwner').value = p?.owner || '';
+    $('#mType').value = p?.type || '오피스텔';
+    $('#mRentalType').value = p?.rentalType || '';
+    $('#mAcquireYear').value = p?.acquireYear || '';
+    $('#mRegDate').value = p?.regDate || '';
+    $('#mAddress').value = p?.address || '';
+    $('#mUnit').value = p?.unit || '';
+    $('#mMemo').value = p?.memo || '';
+    $('#mAcquireDate').value = p?.acquireDate || '';
+    $('#mAcquirePrice').value = p?.acquirePrice ? fmt(p.acquirePrice) : '';
+
+    // 관리 공인중개사 선택지
+    if ($('#mManager')) {
+      $('#mManager').innerHTML = '<option value="">— 미지정 (배정 해제) —</option>' +
+        (Store.data.accounts || []).map(a =>
+          `<option value="${a.id}">${a.name ? `${a.name} (${a.id})` : a.id}</option>`).join('');
+      $('#mManager').value = p?.managerId || '';
+    }
+
+    // 연도별 공시가격
+    modalPriceHistory = p ? (p.priceHistory || []).map(x => ({ ...x })) : [];
+    renderModalPrices();
+
+    // 지도/공부 링크
+    const addr = p?.address || '';
+    $('#mMapLinks').innerHTML = addr
+      ? mapServices(addr, p?.unit).map((s, i) =>
+          `<button type="button" class="map-chip" data-mapidx="${i}">${s.label}</button>`).join('')
+      : '<span class="hint">주소를 입력하고 저장하면 지도·공부 링크가 활성화됩니다.</span>';
+    modalMapAddr = addr; modalMapUnit = p?.unit || '';
+
+    // 카카오 지도 미리보기
+    if ($('#mKakaoKey')) $('#mKakaoKey').value = Store.data.settings?.kakaoKey || '';
+    renderKakaoPreview(addr);
+
+    const l = p?.lease;
+    const ins = l?.insurance || {};
+    $('#mHasLease').checked = !!l;
+    $('#mLeaseFields').style.display = l ? '' : 'none';
+    $('#mLeaseStart').value = l?.start || '';
+    $('#mLeaseEnd').value = l?.end || '';
+    $('#mDeposit').value = l?.deposit ? fmt(l.deposit) : '';
+    $('#mMonthly').value = l?.monthlyRent ? fmt(l.monthlyRent) : '';
+    $('#mTenant').value = l?.tenantName || '';
+    $('#mTenantPhone').value = l?.tenantPhone || '';
+
+    // 보증보험 (가입/미가입)
+    if ($('#mInsStatus')) $('#mInsStatus').value = ins.joined ? 'yes' : 'no';
+    if ($('#mInsCoverage')) $('#mInsCoverage').value = ins.coverage || 'full';
+    if ($('#mInsCompany')) $('#mInsCompany').value = ins.company || '';
+    if ($('#mInsPeriod')) $('#mInsPeriod').value = ins.period || '';
+    if ($('#mInsFee')) $('#mInsFee').value = ins.fee ? fmt(ins.fee) : '';
+    if ($('#mInsTenantShare')) $('#mInsTenantShare').value = ins.tenantShare ? fmt(ins.tenantShare) : '';
+    if ($('#mInsReason')) $('#mInsReason').value = ins.reason || '';
+    if ($('#mInsNote')) $('#mInsNote').value = ins.note || '';
+    syncInsFields();
+
+    renderModalFiles(p?.id);
+
+    $('#btnModalDelete').classList.toggle('hidden', !p);
+    $('#modalBg').classList.remove('hidden');
+  } catch (err) {
+    console.error(err);
+    alert('상세 화면을 여는 중 오류가 발생했습니다: ' + (err.message || err));
+  }
+}
+window.openModal = openModal;
 
 $('#mHasLease').addEventListener('change', e => {
   $('#mLeaseFields').style.display = e.target.checked ? '' : 'none';
+});
+$('#mInsStatus')?.addEventListener('change', syncInsFields);
+
+$('#mFileInput')?.addEventListener('change', async e => {
+  const propId = Number($('#mId').value);
+  if (!propId) { alert('먼저 물건을 저장한 뒤 서류를 첨부해주세요.'); e.target.value = ''; return; }
+  const files = [...(e.target.files || [])];
+  for (const f of files) {
+    if (f.size > 8 * 1024 * 1024) { alert(`${f.name}: 8MB 이하만 첨부 가능합니다.`); continue; }
+    await REMSDB.addFile(propId, f);
+  }
+  e.target.value = '';
+  renderModalFiles(propId);
+});
+$('#mFileList')?.addEventListener('click', async e => {
+  const dl = e.target.dataset.dlfile;
+  const del = e.target.dataset.delfile;
+  if (dl) {
+    const rec = await REMSDB.getFile(dl);
+    if (!rec?.blob) return;
+    const url = URL.createObjectURL(rec.blob);
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+  if (del) {
+    if (!confirm('이 서류를 삭제할까요?')) return;
+    await REMSDB.deleteFile(del);
+    renderModalFiles(Number($('#mId').value));
+  }
 });
 
 $('#btnModalCancel').addEventListener('click', () => $('#modalBg').classList.add('hidden'));
@@ -568,6 +647,7 @@ $('#modalBg').addEventListener('click', e => {
 
 $('#btnModalSave').addEventListener('click', () => {
   const id = $('#mId').value ? Number($('#mId').value) : null;
+  const joined = $('#mInsStatus')?.value === 'yes';
   const lease = $('#mHasLease').checked ? {
     start: $('#mLeaseStart').value,
     end: $('#mLeaseEnd').value,
@@ -576,10 +656,14 @@ $('#btnModalSave').addEventListener('click', () => {
     tenantName: $('#mTenant').value.trim(),
     tenantPhone: $('#mTenantPhone').value.trim(),
     insurance: {
-      joined: $('#mInsJoined').checked,
-      period: $('#mInsPeriod').value.trim(),
-      fee: parseNum($('#mInsFee').value),
-      tenantShare: parseNum($('#mInsTenantShare').value),
+      joined,
+      coverage: joined ? ($('#mInsCoverage')?.value || 'full') : '',
+      company: joined ? ($('#mInsCompany')?.value || '') : '',
+      period: joined ? ($('#mInsPeriod')?.value.trim() || '') : '',
+      fee: joined ? parseNum($('#mInsFee')?.value) : 0,
+      tenantShare: joined ? parseNum($('#mInsTenantShare')?.value) : 0,
+      reason: joined ? '' : ($('#mInsReason')?.value || ''),
+      note: $('#mInsNote')?.value.trim() || '',
     },
   } : null;
 
@@ -594,7 +678,7 @@ $('#btnModalSave').addEventListener('click', () => {
     address: $('#mAddress').value.trim(),
     unit: $('#mUnit').value.trim(),
     memo: $('#mMemo').value.trim(),
-    managerId: $('#mManager').value,
+    managerId: $('#mManager')?.value || '',
     priceHistory: modalPriceHistory.map(r => ({ year: Number(r.year), price: Number(r.price) })),
     lease,
   };

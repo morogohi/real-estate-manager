@@ -73,6 +73,13 @@ const Store = {
       if (p.acquireDate == null) p.acquireDate = '';         // 취득일(정확한 날짜)
       if (!Array.isArray(p.priceHistory)) p.priceHistory = []; // 연도별 공시가격 [{year, price}]
       if (p.managerId == null) p.managerId = '';             // 관리 공인중개사 계정 id
+      if (p.lease && p.lease.insurance) {
+        const ins = p.lease.insurance;
+        if (ins.coverage == null) ins.coverage = ins.joined ? 'full' : '';
+        if (ins.company == null) ins.company = '';
+        if (ins.reason == null) ins.reason = '';
+        if (ins.note == null) ins.note = '';
+      }
     });
   },
 
