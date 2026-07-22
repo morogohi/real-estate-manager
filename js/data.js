@@ -77,20 +77,49 @@ const Store = {
   },
 
   async load() {
-    let raw = null;
-    try {
-      raw = this.isDesktop()
-        ? await window.pywebview.api.load_data()
-        : localStorage.getItem(STORAGE_KEY);
-    } catch (e) { raw = null; }
-
-    let loaded = null;
-    if (raw) {
-      try { loaded = JSON.parse(raw); } catch (e) { /* 손상된 데이터는 초기화 */ }
+    if (this.isDesktop()) {
+      let raw = null;
+      try { raw = await window.pywebview.api.load_data(); } catch (e) {}
+      let loaded = null;
+      if (raw) { try { loaded = JSON.parse(raw); } catch (e) {} }
+      this.data = loaded || this.seedData();
+      this.migrate();
+      this.save(false);
+      return;
     }
-    this.data = loaded || this.seedData();
+
+    // 브라우저: localStorage와 내장 DB(IndexedDB) 중 더 최신 데이터 사용
+    let fromLocal = null;
+    try { fromLocal = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) {}
+    if (!fromLocal || !fromLocal.properties) {
+      // 과거 저장 키 폴백 (키가 바뀌어도 데이터 유실 방지)
+      for (const k of ['rems_data_v2', 'rems_data_v1']) {
+        try {
+          const v = JSON.parse(localStorage.getItem(k));
+          if (v && v.properties) { fromLocal = v; break; }
+        } catch (e) {}
+      }
+    }
+    let fromDb = null;
+    if (window.REMSDB) fromDb = await REMSDB.get(REMSDB.dataKey());
+
+    const up = d => (d && d.meta && d.meta.updatedAt) || 0;
+    let pick = (fromLocal && fromLocal.properties) ? fromLocal : null;
+    // 동률이면 localStorage 우선(로그인 직후 auth.js가 기록한 최신 선택본)
+    if (fromDb && fromDb.properties && (!pick || up(fromDb) > up(pick))) pick = fromDb;
+
+    this.data = pick || this.seedData();
     this.migrate();
-    this.save(false); // 단순 로드는 수정으로 취급하지 않음
+
+    // 스냅샷도 DB 사본으로 복원 (localStorage가 비워진 경우)
+    try {
+      if (!localStorage.getItem(SNAPSHOT_KEY) && window.REMSDB) {
+        const snaps = await REMSDB.get(REMSDB.snapKey());
+        if (Array.isArray(snaps) && snaps.length) localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snaps));
+      }
+    } catch (e) {}
+
+    this.save(false); // 선택된 데이터를 양쪽 저장소에 다시 기록
   },
 
   /**
@@ -108,6 +137,8 @@ const Store = {
       window.pywebview.api.save_data(JSON.stringify(this.data, null, 2));
     } else {
       localStorage.setItem(STORAGE_KEY, json);
+      // 내장 DB(IndexedDB)에도 이중 저장: 앱이 바뀌어도 데이터 유지
+      if (window.REMSDB) REMSDB.set(REMSDB.dataKey(), JSON.parse(json));
     }
     if (touch && window.REMSSync) REMSSync.schedulePush();
   },
@@ -125,7 +156,9 @@ const Store = {
     try {
       const list = this.listSnapshots();
       list.unshift({ t: Date.now(), label: label || '자동', json: JSON.stringify(this.data) });
-      localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(list.slice(0, 10)));
+      const trimmed = list.slice(0, 10);
+      localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(trimmed));
+      if (window.REMSDB) REMSDB.set(REMSDB.snapKey(), trimmed); // DB에도 사본 보관
     } catch (e) { /* 저장소 부족 시 무시 */ }
   },
 

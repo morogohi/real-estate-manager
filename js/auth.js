@@ -142,6 +142,7 @@
               if (window.Store && Store.data) {
                 Store.data = remote;
                 Store.migrate();
+                Store.save(false); // 내장 DB에도 반영
                 if (typeof renderAll === 'function') renderAll();
               }
             }

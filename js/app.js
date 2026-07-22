@@ -269,6 +269,22 @@ function renderModalPrices() {
     : '<tr><td colspan="3" class="empty">등록된 공시가격이 없습니다.</td></tr>';
 }
 
+/** 카카오맵 SDK 로드 실패 시 원인별 안내 (403=키 오류/서비스 미활성, 401=도메인 미등록) */
+function kakaoFailGuide() {
+  const origin = location.origin;
+  return `
+    <div style="padding:16px 18px; font-size:13px; line-height:1.7">
+      <b style="color:var(--danger)">카카오맵을 불러오지 못했습니다.</b><br>
+      대부분 <b>카카오 개발자센터에 이 사이트 도메인이 등록되지 않아서</b> 발생합니다. 아래 순서로 확인해주세요.<br><br>
+      ① <a href="https://developers.kakao.com/console/app" target="_blank" rel="noopener">카카오 개발자센터</a> → 내 애플리케이션 → 해당 앱 선택<br>
+      ② <b>앱 설정 → 플랫폼 → Web</b> 에 사이트 도메인 <code>${origin}</code> 을(를) 추가<br>
+      ③ <b>제품 설정 → 카카오맵</b> 에서 사용 설정 <b>ON</b> 확인<br>
+      ④ 키는 REST API 키가 아닌 <b>JavaScript 키</b>인지 확인<br><br>
+      등록 후 아래 버튼으로 다시 시도하세요.
+      <div style="margin-top:8px"><button type="button" class="btn btn-ghost btn-sm" id="btnKakaoRetry">🔄 지도 다시 불러오기</button></div>
+    </div>`;
+}
+
 function renderKakaoPreview(addr) {
   const box = $('#mMapBox');
   const key = Store.data.settings?.kakaoKey;
@@ -277,7 +293,7 @@ function renderKakaoPreview(addr) {
   box.innerHTML = '';
   const draw = () => {
     if (!(window.kakao && window.kakao.maps && window.kakao.maps.services)) {
-      box.innerHTML = '<div class="empty" style="padding:14px">지도를 불러오지 못했습니다. 키 또는 네트워크를 확인하세요.</div>';
+      box.innerHTML = kakaoFailGuide();
       return;
     }
     kakao.maps.load(() => {
@@ -302,11 +318,19 @@ function renderKakaoPreview(addr) {
   };
   if (window.kakao && window.kakao.maps) { draw(); return; }
   const sc = document.createElement('script');
+  sc.id = 'kakaoSdk';
   sc.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${key}&libraries=services&autoload=false`;
   sc.onload = draw;
-  sc.onerror = () => { box.innerHTML = '<div class="empty" style="padding:14px">카카오맵 SDK 로드 실패 (키/도메인 등록 확인).</div>'; };
+  sc.onerror = () => { box.innerHTML = kakaoFailGuide(); };
   document.head.appendChild(sc);
 }
+
+// 지도 재시도: 실패한 SDK 스크립트를 제거하고 다시 로드
+$('#mMapBox').addEventListener('click', e => {
+  if (e.target.id !== 'btnKakaoRetry') return;
+  document.getElementById('kakaoSdk')?.remove();
+  renderKakaoPreview(modalMapAddr);
+});
 
 // 모달 내 동적 버튼 처리 (지도칩 / 공시가격 삭제)
 $('#mMapLinks').addEventListener('click', e => {

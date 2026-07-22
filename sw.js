@@ -1,11 +1,12 @@
 /* 서비스워커: 네트워크 우선 + 오프라인 폴백 캐시.
  * 항상 최신 코드를 먼저 받으므로 배포 후 구버전이 남는 문제가 없습니다. */
-const CACHE = 'rems-v1';
+const CACHE = 'rems-v2';
 const SHELL = [
   './index.html',
   './manifest.webmanifest',
   './css/style.css',
   './js/crypto-util.js',
+  './js/db.js',
   './js/data.js',
   './js/sync.js',
   './js/data.enc.js',
