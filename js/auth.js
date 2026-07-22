@@ -112,6 +112,7 @@
   window.__remsLogout = function () {
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(ROLE_KEY);
+    sessionStorage.removeItem('rems_view_as');
     location.reload();
   };
 

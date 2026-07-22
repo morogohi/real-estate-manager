@@ -87,6 +87,24 @@ function mapServices(address, unit) {
   ];
 }
 
+/* ---------- 관리자 화면 계정 전환 (view-as) ---------- */
+
+const VIEW_AS_KEY = 'rems_view_as';
+
+/** 현재 전환된 중개사 id ('' = 관리자 본인 화면) */
+function currentViewAs() {
+  if (window.__REMS_ROLE__ !== 'owner') return '';
+  try { return sessionStorage.getItem(VIEW_AS_KEY) || ''; } catch (e) { return ''; }
+}
+
+/** 화면에 보여줄 물건 목록 (관리자가 중개사 화면으로 전환 시 배정 물건만) */
+function visibleProps() {
+  const va = currentViewAs();
+  return va
+    ? Store.data.properties.filter(p => p.managerId === va)
+    : Store.data.properties;
+}
+
 /* ---------- 탭 전환 ---------- */
 
 $$('.nav-item').forEach(btn => {
@@ -127,7 +145,7 @@ document.addEventListener('input', e => {
  * ========================================================= */
 
 function renderDashboard() {
-  const props = Store.data.properties;
+  const props = visibleProps();
   const todos = Store.data.todos.filter(t => !t.done);
 
   const byType = {};
@@ -198,7 +216,7 @@ function renderDashboard() {
  * ========================================================= */
 
 function buildFilters() {
-  const props = Store.data.properties;
+  const props = visibleProps();
   const fill = (sel, values) => {
     const cur = sel.value;
     sel.innerHTML = sel.options[0].outerHTML +
@@ -208,17 +226,30 @@ function buildFilters() {
   fill($('#filterType'), props.map(p => p.type));
   fill($('#filterOwner'), props.map(p => p.owner));
   fill($('#filterRental'), props.map(p => p.rentalType));
+
+  // 담당 중개사 필터 (관리자 전용)
+  const fm = $('#filterManager');
+  if (fm) {
+    const cur = fm.value;
+    fm.innerHTML = '<option value="">전체 중개사</option>' +
+      (Store.data.accounts || []).map(a =>
+        `<option value="${a.id}">${a.name || a.id}</option>`).join('') +
+      '<option value="__none">미지정</option>';
+    fm.value = cur;
+  }
 }
 
 function renderProperties() {
   buildFilters();
   const ft = $('#filterType').value, fo = $('#filterOwner').value,
-        fr = $('#filterRental').value, fs = $('#filterSearch').value.trim();
+        fr = $('#filterRental').value, fs = $('#filterSearch').value.trim(),
+        fm = $('#filterManager') ? $('#filterManager').value : '';
 
-  const rows = Store.data.properties.filter(p =>
+  const rows = visibleProps().filter(p =>
     (!ft || p.type === ft) &&
     (!fo || p.owner === fo) &&
     (!fr || p.rentalType === fr) &&
+    (!fm || (fm === '__none' ? !p.managerId : p.managerId === fm)) &&
     (!fs || (p.address + ' ' + p.unit).includes(fs))
   );
 
@@ -247,7 +278,7 @@ $('#propTable').addEventListener('click', e => {
   if (p) openExternal(mapServices(p.address, p.unit)[0].url);
 });
 
-['filterType', 'filterOwner', 'filterRental'].forEach(id =>
+['filterType', 'filterOwner', 'filterRental', 'filterManager'].forEach(id =>
   $(`#${id}`).addEventListener('change', renderProperties));
 $('#filterSearch').addEventListener('input', renderProperties);
 
@@ -492,7 +523,7 @@ $('#btnAddProp').addEventListener('click', () => openModal(null));
  * ========================================================= */
 
 function renderLeases() {
-  const rows = Store.data.properties
+  const rows = visibleProps()
     .filter(p => p.lease)
     .sort((a, b) => (ddayOf(a.lease.end) ?? 99999) - (ddayOf(b.lease.end) ?? 99999));
 
@@ -576,7 +607,7 @@ $('#btnHoldCalc').addEventListener('click', () => {
 /* ---- 보유 물건 → 보유세 자동 채우기 ---- */
 
 function populatePropPickers() {
-  const opts = Store.data.properties
+  const opts = visibleProps()
     .filter(p => isHouseType(p))
     .map(p => `<option value="${p.id}">${propLabel(p)} (${p.owner})</option>`).join('');
   ['holdPropPick', 'trPropPick'].forEach(id => {
@@ -584,7 +615,7 @@ function populatePropPickers() {
     if (sel) sel.innerHTML = '<option value="">— 직접 입력 —</option>' + opts;
   });
   // 임대소득 소유자 필터
-  const owners = [...new Set(Store.data.properties.map(p => p.owner))].filter(Boolean);
+  const owners = [...new Set(visibleProps().map(p => p.owner))].filter(Boolean);
   const isel = $('#incomeOwner');
   if (isel) {
     const cur = isel.value;
@@ -612,7 +643,7 @@ $('#trPropPick').addEventListener('change', e => {
 /* ---- 종부세 인별 자동 합산 ---- */
 
 $('#btnJbAuto').addEventListener('click', () => {
-  const houses = Store.data.properties.filter(p => isHouseType(p));
+  const houses = visibleProps().filter(p => isHouseType(p));
   const byOwner = {};
   houses.forEach(p => {
     const owner = p.owner || '미지정';
@@ -762,7 +793,7 @@ function downloadCsv(filename, rows) {
 $('#btnExportPropCsv').addEventListener('click', () => {
   const head = ['번호', '소유자', '유형', '임대유형', '취득연도', '주임사등록일', '주소', '동호수',
     '계약시작', '계약만기', '만기D-day', '보증금', '월세', '임차인', '연락처', '보증보험', '메모'];
-  const rows = Store.data.properties.map(p => {
+  const rows = visibleProps().map(p => {
     const l = p.lease;
     const dday = l ? ddayOf(l.end) : null;
     return [
@@ -778,7 +809,7 @@ $('#btnExportPropCsv').addEventListener('click', () => {
 $('#btnExportLeaseCsv').addEventListener('click', () => {
   const head = ['물건', '소유자', '임대유형', '임차인', '연락처', '계약시작', '계약만기', '만기D-day',
     '보증금', '월세', '보증보험', '보증보험기간', '보증보험수수료', '임차인부담분(25%)'];
-  const rows = Store.data.properties.filter(p => p.lease).map(p => {
+  const rows = visibleProps().filter(p => p.lease).map(p => {
     const l = p.lease;
     return [
       propLabel(p), p.owner, p.rentalType, l.tenantName || '', l.tenantPhone || '',
@@ -798,7 +829,7 @@ function icsEscape(s) {
 }
 
 $('#btnExportIcs').addEventListener('click', () => {
-  const leased = Store.data.properties.filter(p => p.lease && p.lease.end);
+  const leased = visibleProps().filter(p => p.lease && p.lease.end);
   if (!leased.length) { alert('만기일이 입력된 임대차 계약이 없습니다.'); return; }
   const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z';
   const ev = p => {
@@ -1065,7 +1096,7 @@ $('#btnGenMaster').addEventListener('click', async () => {
 
 function incomeRows() {
   const owner = $('#incomeOwner').value;
-  return Store.data.properties
+  return visibleProps()
     .filter(p => p.lease && isHouseType(p) && (!owner || p.owner === owner));
 }
 
@@ -1143,12 +1174,49 @@ $('#btnExportIncomeCsv').addEventListener('click', () => {
  * 초기화
  * ========================================================= */
 
+/* 관리자 → 중개사 화면 전환 셀렉트 */
+$('#viewAsSelect').addEventListener('change', e => {
+  const v = e.target.value;
+  try {
+    if (v) sessionStorage.setItem(VIEW_AS_KEY, v);
+    else sessionStorage.removeItem(VIEW_AS_KEY);
+  } catch (err) {}
+  renderAll();
+  window.scrollTo({ top: 0 });
+});
+
 function renderAll() {
+  // 관리자: 화면 계정 전환 UI + view-as 상태 적용
+  const isOwner = window.__REMS_ROLE__ === 'owner';
+  const accts = Store.data.accounts || [];
+  const sw = $('#acctSwitch');
+  let va = currentViewAs();
+  if (va && !accts.some(a => a.id === va)) { // 삭제된 계정이면 해제
+    va = '';
+    try { sessionStorage.removeItem(VIEW_AS_KEY); } catch (e) {}
+  }
+  if (sw) {
+    sw.classList.toggle('hidden', !(isOwner && accts.length));
+    if (isOwner && accts.length) {
+      const sel = $('#viewAsSelect');
+      sel.innerHTML = '<option value="">👑 관리자 (전체 물건)</option>' +
+        accts.map(a => `<option value="${a.id}">${a.name || a.id} 화면</option>`).join('');
+      sel.value = va;
+    }
+  }
+  if (isOwner) {
+    // 중개사 화면 미리보기 중에는 관리자 전용 UI 숨김 (중개사가 보는 그대로)
+    document.body.classList.toggle('role-agent', !!va);
+    document.body.classList.toggle('role-owner', !va);
+  }
+
   const roleTag = $('#roleTag');
   if (roleTag) {
     const r = window.__REMS_ROLE__;
     roleTag.textContent = r === 'agent' ? '공인중개사 모드 (배정 물건만 표시)'
-      : (r === 'owner' ? '소유자 모드' : '');
+      : (r === 'owner'
+          ? (va ? `관리자 → ${managerName(va)} 화면 보기 중` : '관리자(소유자) 모드')
+          : '');
   }
   renderDashboard();
   renderProperties();

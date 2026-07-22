@@ -106,6 +106,14 @@ h3 { font-size: 15px; margin: 14px 0 10px; }
 .nav-item.active { background: var(--primary); color: #fff; font-weight: 600; }
 .sidebar-footer { display: flex; flex-direction: column; gap: 6px; padding-top: 14px; border-top: 1px solid #2a3a5c; }
 
+/* 관리자: 화면 계정 전환 (중개사가 보는 화면 미리보기) */
+.acct-switch { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+.acct-switch label { font-size: 11px; color: #8da2c8; }
+.acct-switch select {
+  width: 100%; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+  background: #1d2b4a; color: #d6deef; border: 1px solid #3d4f76; font-family: inherit;
+}
+
 /* ===== 버튼 ===== */
 .btn {
   border: none; border-radius: 8px; padding: 9px 16px; font-size: 14px;

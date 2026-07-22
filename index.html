@@ -7,7 +7,7 @@
 <title>부동산 통합 관리 시스템</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=215">
+<link rel="stylesheet" href="css/style.css?v=216">
 </head>
 <body>
 
@@ -34,6 +34,10 @@
     </nav>
 
     <div class="sidebar-footer">
+      <div class="acct-switch hidden" id="acctSwitch">
+        <label for="viewAsSelect">🔄 화면 계정 전환</label>
+        <select id="viewAsSelect"><option value="">관리자 (전체 물건)</option></select>
+      </div>
       <button class="btn btn-ghost btn-sm owner-only" id="btnAccounts">👤 중개사 계정 관리</button>
       <button class="btn btn-ghost btn-sm owner-only" id="btnSync">☁️ 클라우드 동기화</button>
       <button class="btn btn-ghost btn-sm" id="btnSnapshots">🕘 변경 이력 복구</button>
@@ -89,6 +93,7 @@
         <select id="filterType"><option value="">전체 유형</option></select>
         <select id="filterOwner"><option value="">전체 소유자</option></select>
         <select id="filterRental"><option value="">전체 임대유형</option></select>
+        <select id="filterManager" class="owner-only"><option value="">전체 중개사</option></select>
         <input type="search" id="filterSearch" placeholder="주소·동호수 검색">
       </div>
       <div class="table-wrap">
@@ -458,14 +463,14 @@
   </div>
 </div>
 
-<script src="js/crypto-util.js?v=215"></script>
-<script src="js/db.js?v=215"></script>
-<script src="js/data.js?v=215"></script>
-<script src="js/sync.js?v=215"></script>
-<script src="js/data.enc.js?v=215"></script>
-<script src="js/accounts.enc.js?v=215"></script>
-<script src="js/auth.js?v=215"></script>
-<script src="js/tax.js?v=215"></script>
-<script src="js/app.js?v=215"></script>
+<script src="js/crypto-util.js?v=216"></script>
+<script src="js/db.js?v=216"></script>
+<script src="js/data.js?v=216"></script>
+<script src="js/sync.js?v=216"></script>
+<script src="js/data.enc.js?v=216"></script>
+<script src="js/accounts.enc.js?v=216"></script>
+<script src="js/auth.js?v=216"></script>
+<script src="js/tax.js?v=216"></script>
+<script src="js/app.js?v=216"></script>
 </body>
 </html>
