@@ -137,13 +137,22 @@ const Store = {
     if (touch && this.data) {
       if (!this.data.meta) this.data.meta = {};
       this.data.meta.updatedAt = Date.now();
-      this.autoSnapshot();
+      try { this.autoSnapshot(); } catch (e) { /* 스냅샷 실패해도 본 저장은 진행 */ }
     }
     const json = JSON.stringify(this.data);
     if (this.isDesktop()) {
       window.pywebview.api.save_data(JSON.stringify(this.data, null, 2));
     } else {
-      localStorage.setItem(STORAGE_KEY, json);
+      try {
+        localStorage.setItem(STORAGE_KEY, json);
+      } catch (e) {
+        // QuotaExceeded 등: IndexedDB만이라도 남기고 사용자에게 알림
+        console.warn('localStorage 저장 실패', e);
+        if (window.REMSDB) {
+          REMSDB.set(REMSDB.dataKey(), JSON.parse(json));
+        }
+        throw new Error('브라우저 저장 공간이 부족합니다. 변경 이력 일부를 삭제한 뒤 다시 저장해주세요.');
+      }
       // 내장 DB(IndexedDB)에도 이중 저장: 앱이 바뀌어도 데이터 유지
       if (window.REMSDB) REMSDB.set(REMSDB.dataKey(), JSON.parse(json));
     }

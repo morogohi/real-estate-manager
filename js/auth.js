@@ -113,6 +113,12 @@
       var assignDoc = null;
       try { assignDoc = await REMSSync.pullAssignments(); } catch (e) {}
       remote = REMSSync.applyAssignmentFilter(remote, c.id, assignDoc);
+      // 로컬에 방금 저장한 임차인·계약 정보가 더 최신이면 클라우드로 덮어쓰지 않음
+      var local = null;
+      try { local = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (e3) {}
+      var lu = (local && local.meta && local.meta.updatedAt) || 0;
+      var ru = (remote.meta && remote.meta.updatedAt) || 0;
+      if (local && local.properties && lu > ru) return;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
       if (window.Store) {
         Store.data = remote;

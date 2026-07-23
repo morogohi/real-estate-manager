@@ -646,56 +646,78 @@ $('#modalBg').addEventListener('click', e => {
 });
 
 $('#btnModalSave').addEventListener('click', () => {
-  const id = $('#mId').value ? Number($('#mId').value) : null;
-  const joined = $('#mInsStatus')?.value === 'yes';
-  const lease = $('#mHasLease').checked ? {
-    start: $('#mLeaseStart').value,
-    end: $('#mLeaseEnd').value,
-    deposit: parseNum($('#mDeposit').value),
-    monthlyRent: parseNum($('#mMonthly').value),
-    tenantName: $('#mTenant').value.trim(),
-    tenantPhone: $('#mTenantPhone').value.trim(),
-    insurance: {
-      joined,
-      coverage: joined ? ($('#mInsCoverage')?.value || 'full') : '',
-      company: joined ? ($('#mInsCompany')?.value || '') : '',
-      period: joined ? ($('#mInsPeriod')?.value.trim() || '') : '',
-      fee: joined ? parseNum($('#mInsFee')?.value) : 0,
-      tenantShare: joined ? parseNum($('#mInsTenantShare')?.value) : 0,
-      reason: joined ? '' : ($('#mInsReason')?.value || ''),
-      note: $('#mInsNote')?.value.trim() || '',
-    },
-  } : null;
+  try {
+    if (!window.Store || !Store.data || !Store.data.properties) {
+      alert('데이터가 아직 로드되지 않았습니다. 새로고침 후 다시 시도해주세요.');
+      return;
+    }
+    const id = $('#mId').value ? Number($('#mId').value) : null;
+    const hasLease = !!$('#mHasLease')?.checked;
+    // 구버전(checkbox#mInsJoined) / 신버전(select#mInsStatus) 모두 호환
+    const joined = $('#mInsStatus')
+      ? $('#mInsStatus').value === 'yes'
+      : !!$('#mInsJoined')?.checked;
+    const lease = hasLease ? {
+      start: $('#mLeaseStart')?.value || '',
+      end: $('#mLeaseEnd')?.value || '',
+      deposit: parseNum($('#mDeposit')?.value),
+      monthlyRent: parseNum($('#mMonthly')?.value),
+      tenantName: ($('#mTenant')?.value || '').trim(),
+      tenantPhone: ($('#mTenantPhone')?.value || '').trim(),
+      insurance: {
+        joined,
+        coverage: joined ? ($('#mInsCoverage')?.value || 'full') : '',
+        company: joined ? ($('#mInsCompany')?.value || '') : '',
+        period: joined ? (($('#mInsPeriod')?.value || '').trim()) : '',
+        fee: joined ? parseNum($('#mInsFee')?.value) : 0,
+        tenantShare: joined ? parseNum($('#mInsTenantShare')?.value) : 0,
+        reason: joined ? '' : ($('#mInsReason')?.value || ''),
+        note: (($('#mInsNote')?.value || '').trim()),
+      },
+    } : null;
 
-  const obj = {
-    owner: $('#mOwner').value.trim(),
-    type: $('#mType').value,
-    rentalType: $('#mRentalType').value.trim(),
-    acquireYear: $('#mAcquireYear').value.trim(),
-    acquireDate: $('#mAcquireDate').value,
-    acquirePrice: parseNum($('#mAcquirePrice').value),
-    regDate: $('#mRegDate').value,
-    address: $('#mAddress').value.trim(),
-    unit: $('#mUnit').value.trim(),
-    memo: $('#mMemo').value.trim(),
-    managerId: $('#mManager')?.value || '',
-    priceHistory: modalPriceHistory.map(r => ({ year: Number(r.year), price: Number(r.price) })),
-    lease,
-  };
+    const prev = id ? Store.data.properties.find(x => x.id === id) : null;
+    const obj = {
+      owner: ($('#mOwner')?.value || '').trim(),
+      type: $('#mType')?.value || '오피스텔',
+      rentalType: ($('#mRentalType')?.value || '').trim(),
+      acquireYear: ($('#mAcquireYear')?.value || '').trim(),
+      acquireDate: $('#mAcquireDate')?.value || '',
+      acquirePrice: parseNum($('#mAcquirePrice')?.value),
+      regDate: $('#mRegDate')?.value || '',
+      address: ($('#mAddress')?.value || '').trim(),
+      unit: ($('#mUnit')?.value || '').trim(),
+      memo: ($('#mMemo')?.value || '').trim(),
+      // 중개사·미리보기에서는 관리자 셀렉트가 숨겨져 있으므로 기존 배정 유지
+      managerId: $('#mManager')
+        ? ($('#mManager').value || '')
+        : (prev?.managerId || ''),
+      priceHistory: (modalPriceHistory || []).map(r => ({ year: Number(r.year), price: Number(r.price) })),
+      lease,
+    };
 
-  if (!obj.address) { alert('주소를 입력해주세요.'); return; }
+    if (!obj.address) { alert('주소를 입력해주세요.'); return; }
 
-  if (id) {
-    const idx = Store.data.properties.findIndex(x => x.id === id);
-    Store.data.properties[idx] = { ...Store.data.properties[idx], ...obj };
-  } else {
-    obj.id = Store.nextId(Store.data.properties);
-    obj.rentStartDate = '';
-    Store.data.properties.push(obj);
+    if (id) {
+      const idx = Store.data.properties.findIndex(x => x.id === id);
+      if (idx < 0) { alert('해당 물건을 찾을 수 없습니다.'); return; }
+      Store.data.properties[idx] = { ...Store.data.properties[idx], ...obj };
+    } else {
+      if (window.__REMS_ROLE__ === 'agent') {
+        alert('공인중개사 계정에서는 새 물건을 추가할 수 없습니다. 기존 물건의 임차인·계약 정보만 수정할 수 있습니다.');
+        return;
+      }
+      obj.id = Store.nextId(Store.data.properties);
+      obj.rentStartDate = '';
+      Store.data.properties.push(obj);
+    }
+    Store.save();
+    $('#modalBg').classList.add('hidden');
+    renderAll();
+  } catch (err) {
+    console.error(err);
+    alert('저장 중 오류가 발생했습니다: ' + (err && err.message ? err.message : err));
   }
-  Store.save();
-  $('#modalBg').classList.add('hidden');
-  renderAll();
 });
 
 $('#btnModalDelete').addEventListener('click', () => {
