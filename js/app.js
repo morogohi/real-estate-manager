@@ -612,17 +612,82 @@ $('#mHasLease').addEventListener('change', e => {
 });
 $('#mInsStatus')?.addEventListener('change', syncInsFields);
 
-$('#mFileInput')?.addEventListener('change', async e => {
-  const propId = Number($('#mId').value);
-  if (!propId) { alert('먼저 물건을 저장한 뒤 서류를 첨부해주세요.'); e.target.value = ''; return; }
-  const files = [...(e.target.files || [])];
-  for (const f of files) {
-    if (f.size > 8 * 1024 * 1024) { alert(`${f.name}: 8MB 이하만 첨부 가능합니다.`); continue; }
-    await REMSDB.addFile(propId, f);
+const FILE_ACCEPT = /\.(pdf|jpe?g|png)$/i;
+const FILE_MAX = 8 * 1024 * 1024;
+
+async function addModalFiles(fileList) {
+  const propId = Number($('#mId')?.value);
+  if (!propId) {
+    alert('먼저 물건을 저장한 뒤 서류를 첨부해주세요.');
+    return;
   }
+  if (!window.REMSDB) {
+    alert('파일 저장소를 사용할 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+    return;
+  }
+  const files = [...(fileList || [])];
+  if (!files.length) return;
+  let added = 0;
+  for (const f of files) {
+    if (!FILE_ACCEPT.test(f.name) && !/^image\/(jpeg|png)$|^application\/pdf$/i.test(f.type || '')) {
+      alert(`${f.name}: PDF·JPG·PNG만 첨부할 수 있습니다.`);
+      continue;
+    }
+    if (f.size > FILE_MAX) {
+      alert(`${f.name}: 8MB 이하만 첨부 가능합니다.`);
+      continue;
+    }
+    await REMSDB.addFile(propId, f);
+    added++;
+  }
+  if (added) renderModalFiles(propId);
+}
+
+$('#mFileInput')?.addEventListener('change', async e => {
+  await addModalFiles(e.target.files);
   e.target.value = '';
-  renderModalFiles(propId);
 });
+
+(function setupFileDropzone() {
+  const zone = $('#mFileDropzone');
+  const input = $('#mFileInput');
+  if (!zone || !input) return;
+  let dragDepth = 0;
+
+  zone.addEventListener('click', e => {
+    if (e.target === input) return;
+    input.click();
+  });
+  zone.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      input.click();
+    }
+  });
+  zone.addEventListener('dragenter', e => {
+    e.preventDefault();
+    dragDepth++;
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragover', e => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragleave', e => {
+    e.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) zone.classList.remove('dragover');
+  });
+  zone.addEventListener('drop', async e => {
+    e.preventDefault();
+    dragDepth = 0;
+    zone.classList.remove('dragover');
+    const files = e.dataTransfer?.files;
+    if (files?.length) await addModalFiles(files);
+  });
+})();
+
 $('#mFileList')?.addEventListener('click', async e => {
   const dl = e.target.dataset.dlfile;
   const del = e.target.dataset.delfile;

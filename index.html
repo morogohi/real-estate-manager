@@ -7,7 +7,7 @@
 <title>부동산 통합 관리 시스템</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=223">
+<link rel="stylesheet" href="css/style.css?v=224">
 </head>
 <body>
 
@@ -416,8 +416,13 @@
     </div>
 
     <h3>📎 계약·보증 서류 보관함 <span class="hint" style="font-weight:400">(보증보험증권 · 표준임대차계약서 · 미가입 동의서 등 PDF/이미지)</span></h3>
-    <div class="form-row">
-      <input type="file" id="mFileInput" accept=".pdf,.jpg,.jpeg,.png" multiple style="flex:1">
+    <div class="file-dropzone" id="mFileDropzone" tabindex="0" role="button" aria-label="서류 파일을 끌어다 놓거나 클릭하여 선택">
+      <input type="file" id="mFileInput" accept=".pdf,.jpg,.jpeg,.png" multiple hidden>
+      <div class="file-dropzone-inner">
+        <div class="file-dropzone-icon">📂</div>
+        <div class="file-dropzone-title">파일을 여기로 끌어다 놓으세요</div>
+        <div class="file-dropzone-sub">또는 클릭하여 선택 · PDF / JPG / PNG · 파일당 8MB 이하</div>
+      </div>
     </div>
     <div id="mFileList"></div>
     <p class="hint">파일은 이 기기의 브라우저 내장 DB에 저장됩니다(외부 전송 없음). 다른 기기에서는 보이지 않으니 원본은 별도 보관하세요.</p>
@@ -512,15 +517,15 @@
   </div>
 </div>
 
-<script src="js/crypto-util.js?v=223"></script>
-<script src="js/db.js?v=223"></script>
-<script src="js/data.js?v=223"></script>
-<script src="js/sync.js?v=223"></script>
-<script src="js/data.enc.js?v=223"></script>
-<script src="js/accounts.enc.js?v=223"></script>
-<script src="js/assignments.js?v=223"></script>
-<script src="js/auth.js?v=223"></script>
-<script src="js/tax.js?v=223"></script>
-<script src="js/app.js?v=223"></script>
+<script src="js/crypto-util.js?v=224"></script>
+<script src="js/db.js?v=224"></script>
+<script src="js/data.js?v=224"></script>
+<script src="js/sync.js?v=224"></script>
+<script src="js/data.enc.js?v=224"></script>
+<script src="js/accounts.enc.js?v=224"></script>
+<script src="js/assignments.js?v=224"></script>
+<script src="js/auth.js?v=224"></script>
+<script src="js/tax.js?v=224"></script>
+<script src="js/app.js?v=224"></script>
 </body>
 </html>
