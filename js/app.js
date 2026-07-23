@@ -647,7 +647,7 @@ $('#modalBg').addEventListener('click', e => {
 
 $('#btnModalSave').addEventListener('click', () => {
   try {
-    if (!window.Store || !Store.data || !Store.data.properties) {
+    if (typeof Store === 'undefined' || !Store.data || !Array.isArray(Store.data.properties)) {
       alert('데이터가 아직 로드되지 않았습니다. 새로고침 후 다시 시도해주세요.');
       return;
     }

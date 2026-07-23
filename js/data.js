@@ -42,7 +42,7 @@ const SEED_TODOS = [
  * 브라우저에서는 localStorage에 저장합니다.
  */
 
-const Store = {
+const Store = window.Store = {
   data: null,
 
   isDesktop() {
