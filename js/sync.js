@@ -1,28 +1,29 @@
 /* =========================================================
  * sync.js - 기기 간 클라우드 동기화 (GitHub 저장소 이용)
- *  · 데이터를 소유자 계정으로 AES-GCM 암호화해 저장소의
- *    data/sync.enc.json 에 올리고(업로드), 로그인 시 내려받아(다운로드)
- *    더 최신인 쪽을 사용합니다. 평문은 절대 저장소에 올라가지 않습니다.
+ *  · 소유자: data/sync.enc.json + accounts.enc.json + assignments.json
+ *  · 중개사: data/patches/{agentId}.enc.json 에 임차인·계약 변경을 암호화 업로드
+ *            소유자 로그인/병합 시 마스터 데이터에 통합
  *  · 다운로드: 공개 저장소라 토큰 불필요
- *  · 업로드: 소유자가 발급한 GitHub Fine-grained 토큰 필요
- *            (해당 저장소 Contents: Read and write 권한만)
+ *  · 업로드: GitHub Contents 쓰기 토큰 필요 (소유자 설정 → 중개사 배정 암호문에 포함)
  * ========================================================= */
 window.REMSSync = (function () {
   'use strict';
 
   var REPO = 'morogohi/real-estate-manager';
   var PATH = 'data/sync.enc.json';
-  var ACCOUNTS_PATH = 'data/accounts.enc.json'; // 중개사 배정 최신본 (배정 변경 즉시 반영)
-  var ASSIGN_PATH = 'data/assignments.json';   // 공개 배정표(중개사별 물건 id) — 암호문과 이중 검증
-  var BRANCH = 'sync-data'; // 별도 브랜치: 동기화 커밋이 사이트 재배포를 유발하지 않음
+  var ACCOUNTS_PATH = 'data/accounts.enc.json';
+  var ASSIGN_PATH = 'data/assignments.json';
+  var PATCH_DIR = 'data/patches';
+  var BRANCH = 'sync-data';
   var API = 'https://api.github.com/repos/' + REPO + '/contents/' + PATH;
   var ACCOUNTS_API = 'https://api.github.com/repos/' + REPO + '/contents/' + ACCOUNTS_PATH;
   var ASSIGN_API = 'https://api.github.com/repos/' + REPO + '/contents/' + ASSIGN_PATH;
+  var PATCH_API = 'https://api.github.com/repos/' + REPO + '/contents/' + PATCH_DIR;
   var CRED_KEY = 'rems_k';
   var LAST_PUSH_KEY = 'rems_last_push';
   var LAST_ACCT_KEY = 'rems_last_acct_push';
+  var LAST_PATCH_KEY = 'rems_last_patch_push';
 
-  /* 로그인 성공 시 auth.js가 세션에 보관한 자격(키 재료) */
   function saveCreds(id, pw) {
     try { sessionStorage.setItem(CRED_KEY, btoa(unescape(encodeURIComponent(id + '\n' + pw)))); } catch (e) {}
   }
@@ -40,7 +41,10 @@ window.REMSSync = (function () {
     try { return (Store.data && Store.data.settings && Store.data.settings.ghToken) || ''; } catch (e) { return ''; }
   }
 
-  /** 원격 sync 파일을 내려받아 복호화. 파일 없으면 null, 실패 시 throw */
+  function patchApi(agentId) {
+    return PATCH_API + '/' + encodeURIComponent(agentId) + '.enc.json';
+  }
+
   async function pullDecrypt(id, pw) {
     var res = await fetch(API + '?ref=' + BRANCH + '&_=' + Date.now(), {
       headers: { 'Accept': 'application/vnd.github.raw+json' },
@@ -53,7 +57,6 @@ window.REMSSync = (function () {
     return JSON.parse(text);
   }
 
-  /** 중개사 로그인용 암호문 목록 다운로드 (토큰 불필요). 없으면 [] */
   async function pullAccountsList() {
     var res = await fetch(ACCOUNTS_API + '?ref=' + BRANCH + '&_=' + Date.now(), {
       headers: { 'Accept': 'application/vnd.github.raw+json' },
@@ -65,7 +68,6 @@ window.REMSSync = (function () {
     return Array.isArray(data) ? data : [];
   }
 
-  /** 공개 배정표 { map: { agentId: [propId,...] }, updatedAt } */
   async function pullAssignments() {
     var res = await fetch(ASSIGN_API + '?ref=' + BRANCH + '&_=' + Date.now(), {
       headers: { 'Accept': 'application/vnd.github.raw+json' },
@@ -87,7 +89,6 @@ window.REMSSync = (function () {
     return { v: 1, updatedAt: (data && data.meta && data.meta.updatedAt) || Date.now(), map: map };
   }
 
-  /** 중개사 데이터에 공개 배정표를 적용해 해제된 물건을 제거 */
   function applyAssignmentFilter(data, agentId, assignDoc) {
     if (!data || !agentId) return data;
     var doc = assignDoc || window.__REMS_ASSIGN__;
@@ -100,9 +101,47 @@ window.REMSSync = (function () {
     return data;
   }
 
-  /** 소유자 데이터에서 중개사별 배정 물건만 담은 암호문 배열 생성 */
+  /** 중개사 로컬(임차인 작업)과 클라우드 배정본을 물건 단위로 병합 */
+  function mergeAgentLocal(cloud, local) {
+    if (!cloud) return local;
+    if (!local || !local.properties || !local.properties.length) return cloud;
+    var out = JSON.parse(JSON.stringify(cloud));
+    var byId = {};
+    (out.properties || []).forEach(function (p) { byId[p.id] = p; });
+    var merged = 0;
+    (local.properties || []).forEach(function (lp) {
+      var cp = byId[lp.id];
+      if (!cp) return;
+      var lt = (lp.meta && lp.meta.updatedAt) || (local.meta && local.meta.updatedAt) || 0;
+      var ct = (cp.meta && cp.meta.updatedAt) || (out.meta && out.meta.updatedAt) || 0;
+      var lLease = lp.lease || null;
+      var cLease = cp.lease || null;
+      var localHas = !!(lLease && (lLease.tenantName || lLease.tenantPhone || lLease.start || lLease.end));
+      var cloudHas = !!(cLease && (cLease.tenantName || cLease.tenantPhone || cLease.start || cLease.end));
+      var localTenant = !!(lLease && (lLease.tenantName || lLease.tenantPhone));
+      var cloudTenant = !!(cLease && (cLease.tenantName || cLease.tenantPhone));
+      var takeLocal = (lt > ct) || (localTenant && !cloudTenant) || (localHas && !cloudHas && lt >= ct);
+      if (!takeLocal) return;
+      cp.lease = lLease;
+      if (lp.memo != null && lp.memo !== '') cp.memo = lp.memo;
+      cp.meta = Object.assign({}, cp.meta || {}, {
+        updatedAt: Math.max(lt, ct, Date.now()),
+        source: 'agent-local',
+      });
+      byId[lp.id] = cp;
+      merged++;
+    });
+    out.properties = (out.properties || []).map(function (p) { return byId[p.id] || p; });
+    out.meta = out.meta || {};
+    out.meta.updatedAt = Math.max(out.meta.updatedAt || 0, (local.meta && local.meta.updatedAt) || 0, Date.now());
+    out.settings = Object.assign({}, local.settings || {}, out.settings || {});
+    out.__remsMergedLocal = merged;
+    return out;
+  }
+
   async function buildAccountEntries(data) {
     var accts = (data && data.accounts) || [];
+    var ownerToken = (data.settings && data.settings.ghToken) || '';
     var entries = [];
     for (var i = 0; i < accts.length; i++) {
       var a = accts[i];
@@ -115,6 +154,8 @@ window.REMSSync = (function () {
         settings: {
           kakaoKey: (data.settings && data.settings.kakaoKey) || '',
           deemedRate: (data.settings && data.settings.deemedRate) != null ? data.settings.deemedRate : 3.5,
+          // 중개사가 임차인 변경을 서버에 올릴 수 있도록 쓰기 토큰 공유(암호문 내부)
+          ghToken: ownerToken,
         },
         meta: { updatedAt: (data.meta && data.meta.updatedAt) || Date.now() },
       };
@@ -125,7 +166,7 @@ window.REMSSync = (function () {
 
   async function putJsonFile(apiUrl, obj, message) {
     var tk = token();
-    if (!tk) throw new Error('GitHub 토큰이 등록되지 않았습니다. 동기화 설정에서 토큰을 저장해주세요.');
+    if (!tk) throw new Error('GitHub 토큰이 등록되지 않았습니다. 관리자 클라우드 동기화에서 토큰을 저장해주세요.');
     var content = btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
     var headers = {
       'Authorization': 'Bearer ' + tk,
@@ -144,7 +185,106 @@ window.REMSSync = (function () {
     }
   }
 
-  /** 중개사 배정 암호문만 클라우드에 올림 (Pages 재배포 없이 즉시 반영) */
+  function buildAgentPatch(data, agentId) {
+    var now = Date.now();
+    return {
+      v: 1,
+      agentId: agentId,
+      updatedAt: (data.meta && data.meta.updatedAt) || now,
+      properties: (data.properties || []).map(function (p) {
+        return {
+          id: p.id,
+          lease: p.lease || null,
+          memo: p.memo || '',
+          meta: {
+            updatedAt: (p.meta && p.meta.updatedAt) || (data.meta && data.meta.updatedAt) || now,
+          },
+        };
+      }),
+    };
+  }
+
+  /** 중개사: 임차인·계약 변경을 암호화해 patches/{id}.enc.json 에 업로드 */
+  async function pushAgentPatch(data) {
+    if (window.__REMS_ROLE__ !== 'agent') throw new Error('공인중개사 계정에서만 사용할 수 있습니다.');
+    var c = creds();
+    if (!c) throw new Error('세션에 로그인 정보가 없습니다. 재로그인해주세요.');
+    if (!token()) throw new Error('서버 반영용 토큰이 없습니다. 관리자가 클라우드 동기화(업로드)를 한 번 실행해야 합니다.');
+    var src = data || Store.data;
+    var patch = buildAgentPatch(src, c.id);
+    var entry = await REMSCrypto.encryptJSON(c.id, c.pw, patch);
+    await putJsonFile(
+      patchApi(c.id),
+      entry,
+      'sync: 중개사(' + c.id + ') 임차인·계약 반영 (' + new Date().toLocaleString('ko-KR') + ')'
+    );
+    try { localStorage.setItem(LAST_PATCH_KEY, String(Date.now())); } catch (e) {}
+    updateTag();
+    return patch;
+  }
+
+  async function pullAgentPatch(agentId, agentPw) {
+    var res = await fetch(patchApi(agentId) + '?ref=' + BRANCH + '&_=' + Date.now(), {
+      headers: { 'Accept': 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var entry = JSON.parse(await res.text());
+    var text = await REMSCrypto.decryptToText(agentId, agentPw, entry);
+    return JSON.parse(text);
+  }
+
+  /** 소유자: 모든 중개사 패치를 마스터 데이터에 병합. 변경 건수 반환 */
+  async function mergeAgentPatches(data) {
+    if (window.__REMS_ROLE__ !== 'owner') throw new Error('소유자 계정에서만 병합할 수 있습니다.');
+    var src = data || Store.data;
+    var accts = src.accounts || [];
+    var byId = {};
+    (src.properties || []).forEach(function (p) { byId[p.id] = p; });
+    var changed = 0;
+    var details = [];
+    for (var i = 0; i < accts.length; i++) {
+      var a = accts[i];
+      if (!a.id || !a.pw) continue;
+      var patch = null;
+      try { patch = await pullAgentPatch(a.id, a.pw); } catch (e) { continue; }
+      if (!patch || !patch.properties) continue;
+      (patch.properties || []).forEach(function (pp) {
+        var op = byId[pp.id];
+        if (!op) return;
+        // 배정된 중개사 물건만 병합
+        if (op.managerId && op.managerId !== a.id) return;
+        var ot = (op.meta && op.meta.updatedAt) || 0;
+        var pt = (pp.meta && pp.meta.updatedAt) || patch.updatedAt || 0;
+        var oLease = op.lease || null;
+        var pLease = pp.lease || null;
+        var patchTenant = !!(pLease && (pLease.tenantName || pLease.tenantPhone));
+        var ownerTenant = !!(oLease && (oLease.tenantName || oLease.tenantPhone));
+        var take = (pt > ot) || (patchTenant && !ownerTenant);
+        if (!take) return;
+        var before = JSON.stringify(oLease || null);
+        var after = JSON.stringify(pLease || null);
+        if (before === after && (pp.memo || '') === (op.memo || '')) return;
+        op.lease = pLease;
+        if (pp.memo != null) op.memo = pp.memo;
+        op.meta = Object.assign({}, op.meta || {}, {
+          updatedAt: Math.max(ot, pt, Date.now()),
+          source: a.id,
+        });
+        byId[pp.id] = op;
+        changed++;
+        details.push({ agentId: a.id, propId: pp.id, tenant: (pLease && pLease.tenantName) || '' });
+      });
+    }
+    src.properties = (src.properties || []).map(function (p) { return byId[p.id] || p; });
+    if (changed) {
+      src.meta = src.meta || {};
+      src.meta.updatedAt = Date.now();
+    }
+    return { changed: changed, details: details };
+  }
+
   async function pushAccounts(data) {
     if (window.__REMS_ROLE__ !== 'owner') throw new Error('소유자 계정에서만 업로드할 수 있습니다.');
     var src = data || Store.data;
@@ -154,7 +294,6 @@ window.REMSSync = (function () {
     try { localStorage.setItem(LAST_ACCT_KEY, String(Date.now())); } catch (e) {}
   }
 
-  /** 현재 데이터를 암호화해 저장소에 커밋 (소유자 전용) + 중개사 배정 동시 갱신 */
   async function push() {
     if (window.__REMS_ROLE__ !== 'owner') throw new Error('소유자 계정에서만 업로드할 수 있습니다.');
     var c = creds();
@@ -168,28 +307,53 @@ window.REMSSync = (function () {
     updateTag();
   }
 
-  /* 저장 후 8초 뒤 자동 업로드 (연속 편집 시 마지막 1회만) */
   var timer = null;
   function schedulePush() {
     updateTag();
-    if (window.__REMS_ROLE__ !== 'owner' || !token() || !creds()) return;
-    clearTimeout(timer);
-    timer = setTimeout(function () {
-      push().catch(function () { updateTag('업로드 실패'); });
-    }, 8000);
+    var role = window.__REMS_ROLE__;
+    if (!creds()) return;
+    if (role === 'owner') {
+      if (!token()) return;
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        push().catch(function () { updateTag('업로드 실패'); });
+      }, 8000);
+      return;
+    }
+    if (role === 'agent') {
+      if (!token()) {
+        updateTag('서버 반영 불가(관리자 동기화 필요)');
+        return;
+      }
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        pushAgentPatch(Store.data)
+          .then(function () { updateTag('관리자 반영 완료'); })
+          .catch(function (err) { updateTag('반영 실패'); console.warn(err); });
+      }, 2500);
+    }
   }
 
-  /** 사이드바 동기화 상태 표시 */
   function updateTag(errText) {
     var el = document.getElementById('syncTag');
     if (!el) return;
-    if (window.__REMS_ROLE__ !== 'owner') { el.textContent = ''; return; }
+    var role = window.__REMS_ROLE__;
     if (errText) { el.textContent = '☁️ ' + errText; return; }
+    if (role === 'agent') {
+      if (!token()) { el.textContent = '☁️ 로컬만 저장(서버 반영 대기)'; return; }
+      var last = Number(localStorage.getItem(LAST_PATCH_KEY) || 0);
+      var cur = (Store.data && Store.data.meta && Store.data.meta.updatedAt) || 0;
+      el.textContent = (last >= cur && last)
+        ? '☁️ 관리자 반영됨 ' + new Date(last).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+        : '☁️ 관리자 반영 대기 중…';
+      return;
+    }
+    if (role !== 'owner') { el.textContent = ''; return; }
     if (!token()) { el.textContent = '☁️ 동기화 미설정(중개사 배정 즉시반영 불가)'; return; }
-    var last = Number(localStorage.getItem(LAST_PUSH_KEY) || 0);
-    var cur = (Store.data && Store.data.meta && Store.data.meta.updatedAt) || 0;
-    el.textContent = (last >= cur && last)
-      ? '☁️ 동기화됨 ' + new Date(last).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+    var lastP = Number(localStorage.getItem(LAST_PUSH_KEY) || 0);
+    var curP = (Store.data && Store.data.meta && Store.data.meta.updatedAt) || 0;
+    el.textContent = (lastP >= curP && lastP)
+      ? '☁️ 동기화됨 ' + new Date(lastP).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
       : '☁️ 업로드 대기 중…';
   }
 
@@ -197,8 +361,10 @@ window.REMSSync = (function () {
     saveCreds: saveCreds, creds: creds, token: token,
     pullDecrypt: pullDecrypt, pullAccountsList: pullAccountsList,
     pullAssignments: pullAssignments, buildAssignments: buildAssignments,
-    applyAssignmentFilter: applyAssignmentFilter,
+    applyAssignmentFilter: applyAssignmentFilter, mergeAgentLocal: mergeAgentLocal,
     buildAccountEntries: buildAccountEntries, pushAccounts: pushAccounts,
     push: push, schedulePush: schedulePush, updateTag: updateTag,
+    pushAgentPatch: pushAgentPatch, pullAgentPatch: pullAgentPatch,
+    mergeAgentPatches: mergeAgentPatches, buildAgentPatch: buildAgentPatch,
   };
 })();

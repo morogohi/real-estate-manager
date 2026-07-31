@@ -766,7 +766,16 @@ $('#btnModalSave').addEventListener('click', () => {
     if (id) {
       const idx = Store.data.properties.findIndex(x => x.id === id);
       if (idx < 0) { alert('해당 물건을 찾을 수 없습니다.'); return; }
-      Store.data.properties[idx] = { ...Store.data.properties[idx], ...obj };
+      const stamp = Date.now();
+      Store.data.properties[idx] = {
+        ...Store.data.properties[idx],
+        ...obj,
+        meta: {
+          ...(Store.data.properties[idx].meta || {}),
+          updatedAt: stamp,
+          source: window.__REMS_ROLE__ || 'edit',
+        },
+      };
     } else {
       if (window.__REMS_ROLE__ === 'agent') {
         alert('공인중개사 계정에서는 새 물건을 추가할 수 없습니다. 기존 물건의 임차인·계약 정보만 수정할 수 있습니다.');
@@ -1144,11 +1153,44 @@ $('#btnExportIcs').addEventListener('click', () => {
 $('#fileImport').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
-  Store.importJson(file, ok => {
-    alert(ok ? '백업 데이터를 불러왔습니다.' : '파일 형식이 올바르지 않습니다.');
-    if (ok) renderAll();
-    e.target.value = '';
-  });
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      // 중개사 「내 작업 백업」 JSON → 관리자 마스터에 임차인·계약만 병합
+      if (data && data.role === 'agent' && Array.isArray(data.properties) && window.__REMS_ROLE__ === 'owner') {
+        let n = 0;
+        data.properties.forEach(pp => {
+          const op = Store.data.properties.find(p => p.id === pp.id);
+          if (!op) return;
+          if (data.agentId && op.managerId && op.managerId !== data.agentId) return;
+          op.lease = pp.lease || null;
+          if (pp.memo != null) op.memo = pp.memo;
+          op.meta = Object.assign({}, op.meta || {}, {
+            updatedAt: (pp.meta && pp.meta.updatedAt) || Date.now(),
+            source: data.agentId || 'import',
+          });
+          n++;
+        });
+        if (n) {
+          Store.save();
+          if (REMSSync.token && REMSSync.token()) REMSSync.schedulePush();
+          renderAll();
+          alert(`중개사 작업 백업에서 ${n}건의 임차인·계약 정보를 병합했습니다.`);
+        } else {
+          alert('병합할 물건이 없습니다. 배정·물건 번호를 확인해주세요.');
+        }
+        e.target.value = '';
+        return;
+      }
+    } catch (err) { /* 일반 백업으로 처리 */ }
+    Store.importJson(file, ok => {
+      alert(ok ? '백업 데이터를 불러왔습니다.' : '파일 형식이 올바르지 않습니다.');
+      if (ok) renderAll();
+      e.target.value = '';
+    });
+  };
+  reader.readAsText(file);
 });
 
 $('#btnReset').addEventListener('click', () => {
@@ -1191,6 +1233,57 @@ $('#btnSyncPush').addEventListener('click', async () => {
     await REMSSync.push();
     syncMsg('업로드 완료. 다른 기기에서 로그인하면 이 데이터를 받게 됩니다.');
   } catch (e) { syncMsg(e.message, true); }
+});
+
+$('#btnMergePatches')?.addEventListener('click', async () => {
+  if (window.__REMS_ROLE__ !== 'owner') return;
+  syncMsg('중개사 작업 패치를 병합하는 중…');
+  try {
+    const r = await REMSSync.mergeAgentPatches(Store.data);
+    if (!r.changed) {
+      syncMsg('병합할 새 중개사 작업이 없습니다. (중개사 PC에서 「관리자에게 반영」을 먼저 눌러주세요)');
+      return;
+    }
+    Store.save();
+    await REMSSync.push();
+    renderAll();
+    syncMsg(`✓ 중개사 작업 ${r.changed}건을 병합하고 클라우드에 반영했습니다.`);
+  } catch (e) {
+    syncMsg('병합 실패: ' + e.message, true);
+  }
+});
+
+$('#btnAgentSync')?.addEventListener('click', async () => {
+  if (window.__REMS_ROLE__ !== 'agent') return;
+  try {
+    REMSSync.updateTag('관리자 반영 중…');
+    await REMSSync.pushAgentPatch(Store.data);
+    alert('임차인·계약 변경을 서버에 올렸습니다.\n관리자(iceman74)가 「중개사 작업 병합·반영」 또는 로그인 시 자동 병합으로 확인할 수 있습니다.');
+    REMSSync.updateTag('관리자 반영 완료');
+  } catch (e) {
+    alert('서버 반영 실패: ' + e.message);
+    REMSSync.updateTag('반영 실패');
+  }
+});
+
+$('#btnAgentExport')?.addEventListener('click', () => {
+  if (window.__REMS_ROLE__ !== 'agent') return;
+  const c = REMSSync.creds();
+  const payload = {
+    v: 1,
+    exportedAt: Date.now(),
+    agentId: c?.id || '',
+    role: 'agent',
+    properties: (Store.data.properties || []).map(p => ({
+      id: p.id, address: p.address, unit: p.unit, lease: p.lease, memo: p.memo, meta: p.meta,
+    })),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `중개사작업_${c?.id || 'agent'}_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 });
 
 $('#btnSyncPull').addEventListener('click', async () => {
@@ -1536,14 +1629,42 @@ async function reconcileAssignmentsToCloud() {
   }
 }
 
+/** 소유자: 중개사 패치 자동 병합 후 필요 시 재배포 */
+async function reconcileAgentPatches() {
+  if (window.__REMS_ROLE__ !== 'owner' || currentViewAs()) return;
+  if (!window.REMSSync || !REMSSync.mergeAgentPatches) return;
+  if (!REMSSync.token || !REMSSync.token()) return;
+  try {
+    REMSSync.updateTag('중개사 작업 확인 중…');
+    const r = await REMSSync.mergeAgentPatches(Store.data);
+    if (!r.changed) { REMSSync.updateTag(); return; }
+    Store.save(false);
+    Store.data.meta.updatedAt = Date.now();
+    localStorage.setItem('rems_data_v3', JSON.stringify(Store.data));
+    await REMSSync.push();
+    renderAll();
+    REMSSync.updateTag('중개사 작업 ' + r.changed + '건 병합됨');
+    const tip = $('#mgrBulkMsg');
+    if (tip) tip.textContent = `✓ 중개사 임차인·계약 작업 ${r.changed}건을 관리자 데이터에 병합했습니다.`;
+  } catch (err) {
+    REMSSync.updateTag();
+    console.warn('patch merge', err);
+  }
+}
+
 /* 데스크톱(pywebview)에서는 API 준비 후, 브라우저에서는 즉시 시작 */
 let booted = false;
 function boot() {
   booted = true;
   Store.load().then(() => {
     renderAll();
-    // 소유자: 로컬에서 해제한 배정이 중개사에 남아 있는 경우 자동 교정
+    // 소유자: 배정 불일치 교정 + 중개사 임차인 작업 자동 병합
     reconcileAssignmentsToCloud();
+    reconcileAgentPatches();
+    // 중개사: 로컬 작업이 있으면 서버 패치 업로드
+    if (window.__REMS_ROLE__ === 'agent' && window.REMSSync) {
+      setTimeout(() => REMSSync.schedulePush(), 1000);
+    }
   });
 }
 

@@ -55,7 +55,7 @@
     throw new Error('invalid');
   }
 
-  /** 중개사: 항상 복호화본으로 properties 교체 + 공개 배정표로 재필터. 소유자: 후보 중 최신 */
+  /** 중개사: 클라우드 배정 + 이 PC 로컬 임차인 작업 병합. 소유자: 후보 중 최신 */
   async function resolveLoginData(role, id, pw, parsed) {
     if (role === 'agent') {
       var data = parsed;
@@ -66,6 +66,16 @@
       if (window.REMSSync && REMSSync.applyAssignmentFilter) {
         data = REMSSync.applyAssignmentFilter(data, id, assignDoc);
       }
+      // 같은 계정으로 이 PC에 남겨 둔 임차인 작업이 있으면 병합(송파조이 등 복구)
+      try {
+        var ctx = await REMSCrypto.sha256hex(role + '|' + id);
+        if (localStorage.getItem(CTX_KEY) === ctx && localStorage.getItem(STORAGE_KEY)) {
+          var local = JSON.parse(localStorage.getItem(STORAGE_KEY));
+          if (local && local.properties && window.REMSSync && REMSSync.mergeAgentLocal) {
+            data = REMSSync.mergeAgentLocal(data, local);
+          }
+        }
+      } catch (eLoc) { /* 무시 */ }
       return data;
     }
     var candidates = [];
@@ -175,6 +185,10 @@
         ov.remove();
         document.body.classList.remove('auth-locked');
         if (typeof window.__remsBoot === 'function') window.__remsBoot();
+        // 중개사: 로컬에 남은 임차인 작업이 있으면 서버 패치로 즉시 반영 시도
+        if (res.role === 'agent' && window.REMSSync && REMSSync.schedulePush) {
+          setTimeout(function () { REMSSync.schedulePush(); }, 800);
+        }
       } catch (err) {
         msg.textContent = '아이디 또는 비밀번호가 올바르지 않습니다.';
         btn.disabled = false;

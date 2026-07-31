@@ -60,6 +60,7 @@ body.auth-locked { overflow: hidden; }
 
 /* ===== 역할(소유자/중개사) ===== */
 body.role-agent .owner-only { display: none !important; }
+body.role-owner .agent-only { display: none !important; }
 .role-tag {
   margin-top: 8px; font-size: 11px; color: #93c5fd;
   text-align: center; opacity: .85;
