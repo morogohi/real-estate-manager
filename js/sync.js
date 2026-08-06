@@ -14,11 +14,14 @@ window.REMSSync = (function () {
   var ACCOUNTS_PATH = 'data/accounts.enc.json';
   var ASSIGN_PATH = 'data/assignments.json';
   var PATCH_DIR = 'data/patches';
+  var FILES_DIR = 'data/files';
   var BRANCH = 'sync-data';
   var API = 'https://api.github.com/repos/' + REPO + '/contents/' + PATH;
   var ACCOUNTS_API = 'https://api.github.com/repos/' + REPO + '/contents/' + ACCOUNTS_PATH;
   var ASSIGN_API = 'https://api.github.com/repos/' + REPO + '/contents/' + ASSIGN_PATH;
   var PATCH_API = 'https://api.github.com/repos/' + REPO + '/contents/' + PATCH_DIR;
+  var FILES_API = 'https://api.github.com/repos/' + REPO + '/contents/' + FILES_DIR;
+  var FILES_CRYPTO_ID = 'rems-files';
   var CRED_KEY = 'rems_k';
   var LAST_PUSH_KEY = 'rems_last_push';
   var LAST_ACCT_KEY = 'rems_last_acct_push';
@@ -41,8 +44,35 @@ window.REMSSync = (function () {
     try { return (Store.data && Store.data.settings && Store.data.settings.ghToken) || ''; } catch (e) { return ''; }
   }
 
+  function filesKey() {
+    try { return (Store.data && Store.data.settings && Store.data.settings.filesKey) || ''; } catch (e) { return ''; }
+  }
+
+  /** 서류 암호화 공통키(소유자·중개사 공유). 없으면 생성(소유자 권장) */
+  function ensureFilesKey() {
+    if (!Store.data) return '';
+    if (!Store.data.settings) Store.data.settings = {};
+    if (!Store.data.settings.filesKey) {
+      var arr = new Uint8Array(24);
+      if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(arr);
+      else for (var i = 0; i < arr.length; i++) arr[i] = Math.floor(Math.random() * 256);
+      Store.data.settings.filesKey = Array.prototype.map.call(arr, function (b) {
+        return ('0' + b.toString(16)).slice(-2);
+      }).join('');
+    }
+    return Store.data.settings.filesKey;
+  }
+
   function patchApi(agentId) {
     return PATCH_API + '/' + encodeURIComponent(agentId) + '.enc.json';
+  }
+
+  function fileIndexApi(propId) {
+    return FILES_API + '/' + encodeURIComponent(String(propId)) + '/index.enc.json';
+  }
+
+  function fileBlobApi(propId, fileId) {
+    return FILES_API + '/' + encodeURIComponent(String(propId)) + '/' + encodeURIComponent(fileId) + '.enc.json';
   }
 
   async function pullDecrypt(id, pw) {
@@ -142,6 +172,7 @@ window.REMSSync = (function () {
   async function buildAccountEntries(data) {
     var accts = (data && data.accounts) || [];
     var ownerToken = (data.settings && data.settings.ghToken) || '';
+    var fKey = (data.settings && data.settings.filesKey) || '';
     var entries = [];
     for (var i = 0; i < accts.length; i++) {
       var a = accts[i];
@@ -154,8 +185,9 @@ window.REMSSync = (function () {
         settings: {
           kakaoKey: (data.settings && data.settings.kakaoKey) || '',
           deemedRate: (data.settings && data.settings.deemedRate) != null ? data.settings.deemedRate : 3.5,
-          // 중개사가 임차인 변경을 서버에 올릴 수 있도록 쓰기 토큰 공유(암호문 내부)
+          // 중개사가 임차인·서류를 서버에 올릴 수 있도록 토큰·서류키 공유(암호문 내부)
           ghToken: ownerToken,
+          filesKey: fKey,
         },
         meta: { updatedAt: (data.meta && data.meta.updatedAt) || Date.now() },
       };
@@ -183,6 +215,155 @@ window.REMSSync = (function () {
       if (res.status === 401 || res.status === 403) throw new Error('토큰 인증 실패(권한/만료 확인). HTTP ' + res.status);
       throw new Error('업로드 실패. HTTP ' + res.status);
     }
+  }
+
+  async function deleteGithubFile(apiUrl, message) {
+    var tk = token();
+    if (!tk) throw new Error('GitHub 토큰이 없습니다.');
+    var headers = {
+      'Authorization': 'Bearer ' + tk,
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+    };
+    var g = await fetch(apiUrl + '?ref=' + BRANCH + '&_=' + Date.now(), { headers: headers, cache: 'no-store' });
+    if (g.status === 404) return;
+    if (!g.ok) throw new Error('삭제 조회 실패 HTTP ' + g.status);
+    var sha = (await g.json()).sha;
+    var res = await fetch(apiUrl + '?ref=' + BRANCH, {
+      method: 'DELETE',
+      headers: headers,
+      body: JSON.stringify({ message: message || 'sync: delete file', sha: sha, branch: BRANCH }),
+    });
+    if (!res.ok) throw new Error('삭제 실패 HTTP ' + res.status);
+  }
+
+  function fileToBase64(file) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () {
+        var bytes = new Uint8Array(r.result);
+        var chunk = 0x8000;
+        var s = '';
+        for (var i = 0; i < bytes.length; i += chunk) {
+          s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+        }
+        resolve(btoa(s));
+      };
+      r.onerror = function () { reject(r.error || new Error('read fail')); };
+      r.readAsArrayBuffer(file);
+    });
+  }
+
+  function base64ToBlob(b64, type) {
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: type || 'application/octet-stream' });
+  }
+
+  async function pullFileIndex(propId) {
+    var key = filesKey();
+    if (!key) return { v: 1, propId: Number(propId), updatedAt: 0, files: [] };
+    var res = await fetch(fileIndexApi(propId) + '?ref=' + BRANCH + '&_=' + Date.now(), {
+      headers: { 'Accept': 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+    if (res.status === 404) return { v: 1, propId: Number(propId), updatedAt: 0, files: [] };
+    if (!res.ok) throw new Error('서류 목록 조회 실패 HTTP ' + res.status);
+    var entry = JSON.parse(await res.text());
+    var text = await REMSCrypto.decryptToText(FILES_CRYPTO_ID, key, entry);
+    var idx = JSON.parse(text);
+    if (!idx.files) idx.files = [];
+    return idx;
+  }
+
+  async function listCloudFiles(propId) {
+    try {
+      var idx = await pullFileIndex(propId);
+      return (idx.files || []).map(function (f) {
+        return {
+          id: f.id,
+          name: f.name,
+          type: f.type,
+          size: f.size,
+          ts: f.ts,
+          uploaderId: f.uploaderId || '',
+          uploaderName: f.uploaderName || '',
+          cloud: true,
+        };
+      }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+    } catch (e) {
+      console.warn('listCloudFiles', e);
+      return [];
+    }
+  }
+
+  async function uploadCloudFile(propId, file, uploader) {
+    if (!token()) throw new Error('서버 업로드용 토큰이 없습니다. 관리자 클라우드 동기화가 필요합니다.');
+    var key = filesKey() || ensureFilesKey();
+    if (!key) throw new Error('서류 암호화 키가 없습니다. 관리자 계정으로 한 번 동기화해주세요.');
+    var fileId = 'f' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    var dataB64 = await fileToBase64(file);
+    var meta = {
+      id: fileId,
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      size: file.size,
+      ts: Date.now(),
+      uploaderId: (uploader && uploader.id) || '',
+      uploaderName: (uploader && uploader.name) || '',
+    };
+    var blobObj = Object.assign({ v: 1, propId: Number(propId), dataB64: dataB64 }, meta);
+    var encBlob = await REMSCrypto.encryptJSON(FILES_CRYPTO_ID, key, blobObj);
+    await putJsonFile(
+      fileBlobApi(propId, fileId),
+      encBlob,
+      'sync: 서류 업로드 #' + propId + ' ' + file.name
+    );
+    var idx = await pullFileIndex(propId);
+    idx.propId = Number(propId);
+    idx.files = (idx.files || []).filter(function (f) { return f.id !== fileId; });
+    idx.files.unshift({
+      id: meta.id, name: meta.name, type: meta.type, size: meta.size, ts: meta.ts,
+      uploaderId: meta.uploaderId, uploaderName: meta.uploaderName,
+    });
+    idx.updatedAt = Date.now();
+    var encIdx = await REMSCrypto.encryptJSON(FILES_CRYPTO_ID, key, idx);
+    await putJsonFile(fileIndexApi(propId), encIdx, 'sync: 서류 목록 갱신 #' + propId);
+    return meta;
+  }
+
+  async function downloadCloudFile(propId, fileId) {
+    var key = filesKey();
+    if (!key) throw new Error('서류 키가 없습니다.');
+    var res = await fetch(fileBlobApi(propId, fileId) + '?ref=' + BRANCH + '&_=' + Date.now(), {
+      headers: { 'Accept': 'application/vnd.github.raw+json' },
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error('서류 다운로드 실패 HTTP ' + res.status);
+    var entry = JSON.parse(await res.text());
+    var text = await REMSCrypto.decryptToText(FILES_CRYPTO_ID, key, entry);
+    var obj = JSON.parse(text);
+    return {
+      id: obj.id,
+      name: obj.name,
+      type: obj.type,
+      size: obj.size,
+      ts: obj.ts,
+      blob: base64ToBlob(obj.dataB64, obj.type),
+    };
+  }
+
+  async function deleteCloudFile(propId, fileId) {
+    if (!token()) throw new Error('토큰이 없습니다.');
+    var key = filesKey();
+    if (!key) throw new Error('서류 키가 없습니다.');
+    await deleteGithubFile(fileBlobApi(propId, fileId), 'sync: 서류 삭제 #' + propId + ' ' + fileId);
+    var idx = await pullFileIndex(propId);
+    idx.files = (idx.files || []).filter(function (f) { return f.id !== fileId; });
+    idx.updatedAt = Date.now();
+    var encIdx = await REMSCrypto.encryptJSON(FILES_CRYPTO_ID, key, idx);
+    await putJsonFile(fileIndexApi(propId), encIdx, 'sync: 서류 목록 갱신(삭제) #' + propId);
   }
 
   function buildAgentPatch(data, agentId) {
@@ -359,6 +540,7 @@ window.REMSSync = (function () {
 
   return {
     saveCreds: saveCreds, creds: creds, token: token,
+    filesKey: filesKey, ensureFilesKey: ensureFilesKey,
     pullDecrypt: pullDecrypt, pullAccountsList: pullAccountsList,
     pullAssignments: pullAssignments, buildAssignments: buildAssignments,
     applyAssignmentFilter: applyAssignmentFilter, mergeAgentLocal: mergeAgentLocal,
@@ -366,5 +548,7 @@ window.REMSSync = (function () {
     push: push, schedulePush: schedulePush, updateTag: updateTag,
     pushAgentPatch: pushAgentPatch, pullAgentPatch: pullAgentPatch,
     mergeAgentPatches: mergeAgentPatches, buildAgentPatch: buildAgentPatch,
+    listCloudFiles: listCloudFiles, uploadCloudFile: uploadCloudFile,
+    downloadCloudFile: downloadCloudFile, deleteCloudFile: deleteCloudFile,
   };
 })();

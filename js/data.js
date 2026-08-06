@@ -68,6 +68,10 @@ const Store = window.Store = {
     if (!Array.isArray(d.accounts)) d.accounts = []; // 공인중개사 계정
     if (!d.meta) d.meta = { updatedAt: 0 };          // 동기화 비교용 수정 시각
     if (d.settings.ghToken == null) d.settings.ghToken = ''; // 클라우드 동기화 토큰
+    // 서류 클라우드 암호화 키(없으면 소유자 쪽에서 생성)
+    if (!d.settings.filesKey && window.__REMS_ROLE__ === 'owner' && window.REMSSync && REMSSync.ensureFilesKey) {
+      REMSSync.ensureFilesKey();
+    }
     (d.properties || []).forEach(p => {
       if (p.acquirePrice == null) p.acquirePrice = 0;       // 취득가액
       if (p.acquireDate == null) p.acquireDate = '';         // 취득일(정확한 날짜)

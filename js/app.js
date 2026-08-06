@@ -519,19 +519,41 @@ function fmtBytes(n) {
 async function renderModalFiles(propId) {
   const list = $('#mFileList');
   if (!list) return;
-  if (!propId || !window.REMSDB) {
+  if (!propId) {
     list.innerHTML = '<div class="empty">저장 후 서류를 첨부할 수 있습니다.</div>';
     return;
   }
-  const files = await REMSDB.listFiles(propId);
-  list.innerHTML = files.length
-    ? files.map(f => `
-      <div class="file-row">
-        <div class="grow" title="${f.name}">📄 ${f.name} <span class="muted-sm">(${fmtBytes(f.size)})</span></div>
-        <button type="button" class="link-btn" data-dlfile="${f.id}">열기</button>
-        <button type="button" class="link-btn" data-delfile="${f.id}" style="color:var(--danger)">삭제</button>
-      </div>`).join('')
-    : '<div class="empty">첨부된 서류가 없습니다.</div>';
+  list.innerHTML = '<div class="empty">서류 목록 불러오는 중…</div>';
+  let local = [];
+  try { local = window.REMSDB ? await REMSDB.listFiles(propId) : []; } catch (e) { local = []; }
+  let cloud = [];
+  try {
+    if (window.REMSSync && REMSSync.listCloudFiles && REMSSync.filesKey && REMSSync.filesKey()) {
+      cloud = await REMSSync.listCloudFiles(propId);
+    }
+  } catch (e) { cloud = []; }
+
+  // 클라우드 우선, 같은 이름·크기의 로컬 복사본은 숨김
+  const cloudKeys = new Set(cloud.map(f => `${f.name}|${f.size}`));
+  const rows = [
+    ...cloud.map(f => ({ ...f, cloud: true })),
+    ...local.filter(f => !cloudKeys.has(`${f.name}|${f.size}`)).map(f => ({
+      ...f, id: 'local-' + f.id, localId: f.id, cloud: false,
+    })),
+  ];
+
+  if (!rows.length) {
+    list.innerHTML = '<div class="empty">첨부된 서류가 없습니다. 파일을 올리며 서버에도 공유됩니다.</div>';
+    return;
+  }
+  list.innerHTML = rows.map(f => `
+    <div class="file-row">
+      <div class="grow" title="${f.name}">📄 ${f.name}
+        <span class="muted-sm">(${fmtBytes(f.size)}${f.uploaderName ? ' · ' + f.uploaderName : ''}${f.cloud ? ' · ☁️서버' : ' · 이 PC만'})</span>
+      </div>
+      <button type="button" class="link-btn" data-openfile="${f.id}" data-cloud="${f.cloud ? '1' : '0'}" data-localid="${f.localId || ''}">열기</button>
+      <button type="button" class="link-btn" data-delfile="${f.id}" data-cloud="${f.cloud ? '1' : '0'}" data-localid="${f.localId || ''}" style="color:var(--danger)">삭제</button>
+    </div>`).join('');
 }
 
 function openModal(id) {
@@ -615,19 +637,31 @@ $('#mInsStatus')?.addEventListener('change', syncInsFields);
 const FILE_ACCEPT = /\.(pdf|jpe?g|png)$/i;
 const FILE_MAX = 8 * 1024 * 1024;
 
+function currentUploader() {
+  const c = window.REMSSync && REMSSync.creds ? REMSSync.creds() : null;
+  if (window.__REMS_ROLE__ === 'owner') {
+    return { id: c?.id || 'owner', name: '관리자' };
+  }
+  const names = { joy6164: '송파조이부동산', seonyu4897: '선유나무공인중개사', paragon8818: '파라곤다운공인중개사' };
+  const acct = (Store.data.accounts || []).find(a => a.id === c?.id);
+  return { id: c?.id || 'agent', name: (acct && acct.name) || names[c?.id] || c?.id || '중개사' };
+}
+
 async function addModalFiles(fileList) {
   const propId = Number($('#mId')?.value);
   if (!propId) {
     alert('먼저 물건을 저장한 뒤 서류를 첨부해주세요.');
     return;
   }
-  if (!window.REMSDB) {
-    alert('파일 저장소를 사용할 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.');
-    return;
-  }
   const files = [...(fileList || [])];
   if (!files.length) return;
   let added = 0;
+  let cloudOk = 0;
+  let cloudErr = '';
+  const uploader = currentUploader();
+  const canCloud = !!(window.REMSSync && REMSSync.token && REMSSync.token() &&
+    (REMSSync.filesKey() || (window.__REMS_ROLE__ === 'owner' && REMSSync.ensureFilesKey)));
+
   for (const f of files) {
     if (!FILE_ACCEPT.test(f.name) && !/^image\/(jpeg|png)$|^application\/pdf$/i.test(f.type || '')) {
       alert(`${f.name}: PDF·JPG·PNG만 첨부할 수 있습니다.`);
@@ -637,10 +671,31 @@ async function addModalFiles(fileList) {
       alert(`${f.name}: 8MB 이하만 첨부 가능합니다.`);
       continue;
     }
-    await REMSDB.addFile(propId, f);
+    // 로컬 캐시(오프라인용)
+    try { if (window.REMSDB) await REMSDB.addFile(propId, f); } catch (e) { /* ignore */ }
     added++;
+    if (canCloud) {
+      try {
+        if (window.__REMS_ROLE__ === 'owner') REMSSync.ensureFilesKey();
+        await REMSSync.uploadCloudFile(propId, f, uploader);
+        cloudOk++;
+      } catch (err) {
+        cloudErr = err.message || String(err);
+        console.warn(err);
+      }
+    }
   }
-  if (added) renderModalFiles(propId);
+  if (added) {
+    await renderModalFiles(propId);
+    if (canCloud && cloudOk) {
+      // 소유자가 새 filesKey를 만든 경우 계정 배정본에도 키가 실리도록 업로드 예약
+      if (window.__REMS_ROLE__ === 'owner') REMSSync.schedulePush();
+    } else if (added && !canCloud) {
+      alert('이 PC에만 저장되었습니다.\n관리자·다른 PC와 공유하려면 관리자가 ☁️ 클라우드 동기화를 한 뒤,\n중개사는 재로그인하고 다시 올려주세요.');
+    } else if (cloudErr) {
+      alert(`일부 파일은 로컬에만 저장되었습니다.\n서버 업로드 오류: ${cloudErr}`);
+    }
+  }
 }
 
 $('#mFileInput')?.addEventListener('change', async e => {
@@ -689,19 +744,49 @@ $('#mFileInput')?.addEventListener('change', async e => {
 })();
 
 $('#mFileList')?.addEventListener('click', async e => {
-  const dl = e.target.dataset.dlfile;
+  const openId = e.target.dataset.openfile;
   const del = e.target.dataset.delfile;
-  if (dl) {
-    const rec = await REMSDB.getFile(dl);
-    if (!rec?.blob) return;
-    const url = URL.createObjectURL(rec.blob);
-    window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  const isCloud = e.target.dataset.cloud === '1';
+  const localId = e.target.dataset.localid;
+  const propId = Number($('#mId').value);
+
+  if (openId) {
+    try {
+      let blob = null;
+      let name = 'file';
+      if (isCloud && window.REMSSync) {
+        const rec = await REMSSync.downloadCloudFile(propId, openId);
+        blob = rec.blob; name = rec.name;
+      } else if (window.REMSDB) {
+        const id = localId || String(openId).replace(/^local-/, '');
+        const rec = await REMSDB.getFile(id);
+        if (!rec?.blob) { alert('파일을 찾을 수 없습니다.'); return; }
+        blob = rec.blob; name = rec.name || name;
+      }
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.target = '_blank'; a.rel = 'noopener';
+      a.download = name;
+      // 열기(새 탭) + 다운로드 가능
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 120000);
+    } catch (err) {
+      alert('열기 실패: ' + (err.message || err));
+    }
   }
   if (del) {
     if (!confirm('이 서류를 삭제할까요?')) return;
-    await REMSDB.deleteFile(del);
-    renderModalFiles(Number($('#mId').value));
+    try {
+      if (isCloud && window.REMSSync) {
+        await REMSSync.deleteCloudFile(propId, del);
+      } else if (window.REMSDB) {
+        await REMSDB.deleteFile(localId || String(del).replace(/^local-/, ''));
+      }
+    } catch (err) {
+      alert('삭제 실패: ' + (err.message || err));
+    }
+    renderModalFiles(propId);
   }
 });
 
@@ -1634,6 +1719,14 @@ async function reconcileAgentPatches() {
   if (window.__REMS_ROLE__ !== 'owner' || currentViewAs()) return;
   if (!window.REMSSync || !REMSSync.mergeAgentPatches) return;
   if (!REMSSync.token || !REMSSync.token()) return;
+  // 서류 공유 키가 없으면 생성 후 중개사 계정 암호문에 실리도록 업로드
+  try {
+    if (REMSSync.ensureFilesKey && !REMSSync.filesKey()) {
+      REMSSync.ensureFilesKey();
+      Store.save(false);
+      await REMSSync.pushAccounts(Store.data);
+    }
+  } catch (e) { console.warn('filesKey bootstrap', e); }
   try {
     REMSSync.updateTag('중개사 작업 확인 중…');
     const r = await REMSSync.mergeAgentPatches(Store.data);
