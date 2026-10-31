@@ -77,6 +77,7 @@ const Store = window.Store = {
       if (p.acquireDate == null) p.acquireDate = '';         // 취득일(정확한 날짜)
       if (!Array.isArray(p.priceHistory)) p.priceHistory = []; // 연도별 공시가격 [{year, price}]
       if (p.managerId == null) p.managerId = '';             // 관리 공인중개사 계정 id
+      if (p.lease && p.lease.use == null) p.lease.use = '주거'; // 임대 용도(주거/업무)
       if (p.lease && p.lease.insurance) {
         const ins = p.lease.insurance;
         if (ins.coverage == null) ins.coverage = ins.joined ? 'full' : '';
@@ -87,6 +88,15 @@ const Store = window.Store = {
     });
   },
 
+  /* 세무 소명 모듈 필드(임대차 이력·양도일·해명 건) */
+  migrateExtra() {
+    if (window.TaxCase) TaxCase.migrate(this.data);
+    else {
+      if (!Array.isArray(this.data.taxCases)) this.data.taxCases = [];
+      (this.data.properties || []).forEach(p => { if (!Array.isArray(p.leaseHistory)) p.leaseHistory = []; });
+    }
+  },
+
   async load() {
     if (this.isDesktop()) {
       let raw = null;
@@ -94,7 +104,7 @@ const Store = window.Store = {
       let loaded = null;
       if (raw) { try { loaded = JSON.parse(raw); } catch (e) {} }
       this.data = loaded || this.seedData();
-      this.migrate();
+      this.migrate(); this.migrateExtra();
       this.save(false);
       return;
     }
@@ -120,7 +130,7 @@ const Store = window.Store = {
     if (fromDb && fromDb.properties && (!pick || up(fromDb) > up(pick))) pick = fromDb;
 
     this.data = pick || this.seedData();
-    this.migrate();
+    this.migrate(); this.migrateExtra();
 
     // 스냅샷도 DB 사본으로 복원 (localStorage가 비워진 경우)
     try {
@@ -194,7 +204,7 @@ const Store = window.Store = {
     if (!s) return false;
     this.snapshot('복원 직전');
     this.data = JSON.parse(s.json);
-    this.migrate();
+    this.migrate(); this.migrateExtra();
     this.save();
     return true;
   },
@@ -219,7 +229,7 @@ const Store = window.Store = {
         const parsed = JSON.parse(reader.result);
         if (!parsed.properties) throw new Error('형식 오류');
         this.data = parsed;
-        this.migrate();
+        this.migrate(); this.migrateExtra();
         this.save();
         onDone(true);
       } catch (e) {
@@ -233,7 +243,7 @@ const Store = window.Store = {
     this.snapshot('재설정 직전'); // 실수 복구용
     if (!this.isDesktop()) localStorage.removeItem(STORAGE_KEY);
     this.data = this.seedData();
-    this.migrate();
+    this.migrate(); this.migrateExtra();
     this.save();
   },
 };

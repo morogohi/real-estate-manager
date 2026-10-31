@@ -169,7 +169,8 @@ function renderDashboard() {
     <div class="card ${noInsurance.length ? 'warn' : ''}"><div class="label">보증보험 미가입</div><div class="value">${noInsurance.length}건</div>
       <div class="sub">임대차 계약 ${leased.length}건 중</div></div>
     <div class="card"><div class="label">미완료 할일</div><div class="value">${todos.length}건</div>
-      <div class="sub">민원·신고 업무</div></div>`;
+      <div class="sub">민원·신고 업무</div></div>
+    ${taxCaseCard()}`;
 
   // 만기 임박/경과
   const expList = [...expired, ...expiring]
@@ -194,10 +195,13 @@ function renderDashboard() {
       </div>`).join('')
     : '<div class="empty">모든 임대차에 보증보험이 가입되어 있습니다.</div>';
 
-  // 할일
+  // 할일 (+ 진행 중인 세무 해명 건을 맨 위에)
   const dued = todos.filter(t => t.due).sort((a, b) => a.due.localeCompare(b.due));
   const rest = todos.filter(t => !t.due);
-  $('#dashTodos').innerHTML = [...dued, ...rest].slice(0, 7).map(t => `
+  const caseItems = (window.TaxCase && window.__REMS_ROLE__ !== 'agent' && !currentViewAs())
+    ? TaxCase.openCases().map(c => ({ title: `📨 세무 해명: ${c.office || ''} ${c.docNo || ''}`.trim(), note: `${c.year}년 귀속 · ${c.status || ''}`, due: c.due }))
+    : [];
+  $('#dashTodos').innerHTML = [...caseItems, ...dued, ...rest].slice(0, 7).map(t => `
     <div class="list-item">
       <div><div class="title">${t.title}</div>${t.note ? `<div class="sub">${t.note}</div>` : ''}</div>
       ${t.due ? ddayBadge(ddayOf(t.due)) : '<span class="badge gray">기한없음</span>'}
@@ -209,6 +213,18 @@ function renderDashboard() {
       <div><div class="title">${b.owner}</div>
       <div class="sub">${b.regNo} · 사업자번호 ${b.bizNo}</div></div>
     </div>`).join('');
+}
+
+/** 대시보드: 진행 중 세무 해명안내 건 카드 */
+function taxCaseCard() {
+  if (!window.TaxCase || window.__REMS_ROLE__ === 'agent' || currentViewAs()) return '';
+  const open = TaxCase.openCases();
+  if (!open.length) return '';
+  const next = open.filter(c => c.due).sort((a, b) => a.due.localeCompare(b.due))[0];
+  const d = next ? ddayOf(next.due) : null;
+  return `<div class="card ${d != null && d <= 7 ? 'alert' : 'warn'}" style="cursor:pointer" onclick="document.querySelector('[data-tab=taxcase]').click()">
+    <div class="label">세무 해명 진행</div><div class="value">${open.length}건</div>
+    <div class="sub">${next ? `${next.office || ''} 기한 ${next.due} (${d < 0 ? '경과' : 'D-' + d})` : '기한 미입력'}</div></div>`;
 }
 
 /* =========================================================
@@ -619,6 +635,7 @@ function openModal(id) {
     syncInsFields();
 
     renderModalFiles(p?.id);
+    if (window.TaxCase) TaxCase.onModalOpen(p);
 
     $('#btnModalDelete').classList.toggle('hidden', !p);
     $('#modalBg').classList.remove('hidden');
@@ -861,6 +878,7 @@ $('#btnModalSave').addEventListener('click', () => {
           source: window.__REMS_ROLE__ || 'edit',
         },
       };
+      if (window.TaxCase) TaxCase.onModalSave(Store.data.properties[idx]);
     } else {
       if (window.__REMS_ROLE__ === 'agent') {
         alert('공인중개사 계정에서는 새 물건을 추가할 수 없습니다. 기존 물건의 임차인·계약 정보만 수정할 수 있습니다.');
@@ -868,6 +886,8 @@ $('#btnModalSave').addEventListener('click', () => {
       }
       obj.id = Store.nextId(Store.data.properties);
       obj.rentStartDate = '';
+      obj.leaseHistory = [];
+      if (window.TaxCase) TaxCase.onModalSave(obj);
       Store.data.properties.push(obj);
     }
     Store.save();
@@ -1385,7 +1405,7 @@ $('#btnSyncPull').addEventListener('click', async () => {
     }
     Store.snapshot('클라우드 내려받기 직전');
     Store.data = remote;
-    Store.migrate();
+    Store.migrate(); if (Store.migrateExtra) Store.migrateExtra();
     Store.save(false);
     renderAll();
     syncMsg('클라우드 데이터를 적용했습니다.');
@@ -1679,6 +1699,7 @@ function renderAll() {
   renderTodos();
   populatePropPickers();
   renderIncome();
+  if (window.TaxCase) TaxCase.render();
   if (window.REMSSync) REMSSync.updateTag();
 }
 

@@ -132,7 +132,7 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
       if (window.Store) {
         Store.data = remote;
-        Store.migrate();
+        Store.migrate(); if (Store.migrateExtra) Store.migrateExtra();
         Store.save(false);
         if (typeof renderAll === 'function') renderAll();
       }
@@ -240,7 +240,7 @@
             localStorage.setItem(STORAGE_KEY, JSON.stringify(best));
             if (window.Store && Store.data) {
               Store.data = best;
-              Store.migrate();
+              Store.migrate(); if (Store.migrateExtra) Store.migrateExtra();
               Store.save(false);
               if (typeof renderAll === 'function') renderAll();
             }

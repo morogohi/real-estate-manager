@@ -7,7 +7,7 @@
 <title>부동산 통합 관리 시스템</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=226">
+<link rel="stylesheet" href="css/style.css?v=227">
 </head>
 <body>
 
@@ -30,6 +30,7 @@
       <button class="nav-item" data-tab="leases">📋 임대차 관리</button>
       <button class="nav-item" data-tab="tax">🧮 세금 계산기</button>
       <button class="nav-item" data-tab="income">🧾 임대소득 신고</button>
+      <button class="nav-item owner-only" data-tab="taxcase">📑 세무 소명·해명</button>
       <button class="nav-item" data-tab="todos">✅ 할일 / 민원</button>
     </nav>
 
@@ -303,6 +304,52 @@
       </div>
     </section>
 
+    <!-- 세무 소명·해명 대응 -->
+    <section class="tab hidden owner-only" id="tab-taxcase">
+      <div class="page-head">
+        <h1>세무 소명 · 해명안내 대응</h1>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <button class="btn btn-ghost" id="btnTcCsv">귀속연도 내역 CSV</button>
+          <label class="btn btn-ghost" for="tcImport">건 파일 불러오기</label>
+          <input type="file" id="tcImport" accept=".json" hidden>
+          <button class="btn btn-primary" id="btnTcNewCase">+ 해명안내 건 등록</button>
+        </div>
+      </div>
+      <p class="disclaimer">※ 임대차 <b>이력</b>(종료된 과거 계약·공실 기간)과 현재 계약을 합쳐 <b>귀속연도별로 일할 계산</b>합니다.
+        간주임대료는 보증금 <b>적수</b> 기준(일자별 보증금 합계 − 3억원) × 60% × 1/365 × 정기예금이자율이며, 소형주택(전용 40㎡ 이하·기준시가 2억원 이하)은 물건 상세에서 「소형주택」 체크 시 제외됩니다.
+        세무서 제출 전 반드시 계약서·입금내역 원본과 대조하세요.</p>
+
+      <div class="filters">
+        <select id="tcYear"></select>
+        <select id="tcOwner"><option value="">전체 소유자</option></select>
+        <select id="tcFilter">
+          <option value="">전체 상태</option>
+          <option value="issue">보완 필요만</option>
+          <option value="ok">증빙 완료만</option>
+        </select>
+        <label class="check" style="display:flex;align-items:center;gap:6px;font-size:13px">
+          <input type="checkbox" id="tcDeemed" checked> 간주임대료 포함(3주택 이상)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px">이자율(%) <input type="number" id="tcRate" step="0.1" style="width:70px"></label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px">금융수익(원) <input type="text" id="tcFin" class="num" style="width:110px" placeholder="0"></label>
+      </div>
+
+      <div class="cards" id="tcCards"></div>
+
+      <div class="panel">
+        <h2>🗓️ 물건별 귀속연도 임대 커버리지</h2>
+        <div class="table-wrap">
+          <table class="table" id="tcTable">
+            <thead><tr><th>물건</th><th>보유기간</th><th>계약 구간 (📄계약서 🏛️신고필증)</th><th>계약 커버</th><th>월세수입(일할)</th><th>평균보증금</th><th>상태</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <h2 style="margin-top:22px">📨 세무서 해명안내 건</h2>
+      <div id="tcCases"></div>
+    </section>
+
     <!-- 할일/민원 -->
     <section class="tab hidden" id="tab-todos">
       <div class="page-head">
@@ -340,6 +387,8 @@
       <label>취득일 <input type="date" id="mAcquireDate"></label>
       <label>취득가액(원) <input type="text" id="mAcquirePrice" class="num" placeholder="양도세 계산용"></label>
       <label>주임사 등록일 <input type="date" id="mRegDate"></label>
+      <label>양도일 <input type="date" id="mDisposeDate"></label>
+      <label class="check" style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="mSmallHouse"> 소형주택 (전용 40㎡·기준시가 2억 이하, 간주임대료 제외)</label>
       <label>동호수 <input type="text" id="mUnit"></label>
       <label class="wide">주소 <input type="text" id="mAddress"></label>
       <label class="wide">메모 <input type="text" id="mMemo"></label>
@@ -378,6 +427,13 @@
       <label>월세(원) <input type="text" id="mMonthly" class="num"></label>
       <label>임차인 성명 <input type="text" id="mTenant"></label>
       <label>임차인 연락처 <input type="text" id="mTenantPhone"></label>
+      <label>임대 용도
+        <select id="mLeaseUse"><option>주거</option><option>업무</option></select>
+      </label>
+      <label class="check" style="flex-direction:row;align-items:center;gap:10px">
+        <span><input type="checkbox" id="mLeaseContract"> 계약서 확보</span>
+        <span><input type="checkbox" id="mLeaseReport"> 신고필증</span>
+      </label>
 
       <label>보증보험
         <select id="mInsStatus">
@@ -415,6 +471,20 @@
         </select>
       </label>
       <label class="wide">보증보험 메모 <input type="text" id="mInsNote" placeholder="미가입 사유 상세, 동의서 징구 여부, 특약 내용 등"></label>
+    </div>
+
+    <div class="owner-only" id="mHistorySection">
+      <h3>🗂️ 임대차 이력 <span class="hint" style="font-weight:400">(종료된 과거 계약·공실 기간 — 귀속연도 임대수입·세무 소명 계산에 사용)</span></h3>
+      <div class="form-row">
+        <button type="button" class="btn btn-ghost btn-sm" id="btnAddHistory">+ 이력 추가</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="btnLeaseToHistory">현재 계약 → 이력으로 이동 (재계약 입력)</button>
+      </div>
+      <div class="table-wrap" style="margin-top:6px">
+        <table class="table" id="mHistoryTable">
+          <thead><tr><th>시작</th><th>종료</th><th>임차인</th><th>보증금</th><th>월세</th><th>용도</th><th>증빙</th><th>메모</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
 
     <h3>📎 계약·보증 서류 보관함 <span class="hint" style="font-weight:400">(보증보험증권 · 표준임대차계약서 · 미가입 동의서 등 PDF/이미지)</span></h3>
@@ -521,15 +591,30 @@
   </div>
 </div>
 
-<script src="js/crypto-util.js?v=226"></script>
-<script src="js/db.js?v=226"></script>
-<script src="js/data.js?v=226"></script>
-<script src="js/sync.js?v=226"></script>
-<script src="js/data.enc.js?v=226"></script>
-<script src="js/accounts.enc.js?v=226"></script>
-<script src="js/assignments.js?v=226"></script>
-<script src="js/auth.js?v=226"></script>
-<script src="js/tax.js?v=226"></script>
-<script src="js/app.js?v=226"></script>
+<!-- ===== 해명의견서 초안 모달 ===== -->
+<div class="modal-bg hidden" id="tcOpinionBg">
+  <div class="modal">
+    <h2>📝 해명의견서 초안</h2>
+    <p class="hint">홈택스 「납세자 해명자료 제출」의 의견란 또는 의견서 문서에 붙여넣은 뒤 [ ] 부분과 수치를 확인하세요.</p>
+    <textarea id="tcOpinionText" rows="18" style="width:100%;font-family:inherit;font-size:13px"></textarea>
+    <div class="form-row" style="justify-content:flex-end;margin-top:10px">
+      <button class="btn btn-ghost" id="btnTcOpinionTxt">TXT 저장</button>
+      <button class="btn btn-ghost" id="btnTcOpinionCopy">복사</button>
+      <button class="btn btn-primary" id="btnTcOpinionClose">닫기</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/crypto-util.js?v=227"></script>
+<script src="js/db.js?v=227"></script>
+<script src="js/data.js?v=227"></script>
+<script src="js/sync.js?v=227"></script>
+<script src="js/data.enc.js?v=227"></script>
+<script src="js/accounts.enc.js?v=227"></script>
+<script src="js/assignments.js?v=227"></script>
+<script src="js/auth.js?v=227"></script>
+<script src="js/tax.js?v=227"></script>
+<script src="js/app.js?v=227"></script>
+<script src="js/taxcase.js?v=227"></script>
 </body>
 </html>
