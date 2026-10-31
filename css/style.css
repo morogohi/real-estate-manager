@@ -438,3 +438,36 @@ hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
   .auth-card { padding: 26px 20px 20px; }
 }
+
+/* ===== 관리 현황 (중개사 현황 보고) ===== */
+.form-grid textarea {
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;
+  font-family: inherit; color: var(--text); resize: vertical;
+}
+.status-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.status-chip {
+  border: 1px solid var(--border); background: var(--panel, #fff); color: var(--text);
+  border-radius: 20px; padding: 6px 12px; font-size: 13px; cursor: pointer; font-family: inherit;
+}
+.status-chip b { margin-left: 4px; }
+.status-chip.green b { color: #047857; }
+.status-chip.red b { color: #b91c1c; }
+.status-chip.amber b { color: #b45309; }
+.status-chip.blue b { color: #1d4ed8; }
+.status-chip.purple b { color: #7c3aed; }
+.status-chip.active { background: #111c33; color: #fff; border-color: #111c33; }
+.status-chip.active b { color: #fff; }
+.st-cell { cursor: pointer; }
+.st-cell:hover .badge { outline: 2px solid rgba(29, 78, 216, .25); }
+.st-dates { font-size: 12px; white-space: nowrap; }
+.st-note { max-width: 260px; font-size: 13px; }
+.list-item.clickable { cursor: pointer; }
+.list-item.clickable:hover { background: #f8fafd; }
+.st-current { background: #f8fafd; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; font-size: 14px; }
+.st-current .muted-sm { margin-top: 4px; line-height: 1.8; }
+.st-log { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px 12px; }
+.st-log-item { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.st-log-item:last-child { border-bottom: none; }
+.st-log-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.st-log-note { font-size: 13px; margin-top: 4px; white-space: pre-wrap; }
+#statusTable .btn { white-space: nowrap; }

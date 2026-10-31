@@ -37,7 +37,7 @@ function typeBadge(type) {
 }
 
 function propLabel(p) {
-  const short = p.address.replace(/^(서울시?|서울특별시|경기도?|경기|충청남도)\s*/, '').split(' ').slice(0, 3).join(' ');
+  const short = p.address.replace(/^(서울특별시|서울시?|경기도?|충청남도)\s*/, '').split(' ').slice(0, 3).join(' ');
   return `${short} ${p.unit || ''}`.trim();
 }
 
@@ -156,6 +156,7 @@ function renderDashboard() {
   const expiring = leased.filter(p => { const d = ddayOf(p.lease.end); return d >= 0 && d <= 90; });
   const noInsurance = leased.filter(p => !p.lease.insurance?.joined);
   const rentalBiz = props.filter(p => (p.rentalType || '').includes('주택임대사업자'));
+  const vacantish = props.filter(p => ['vacant', 'marketing', 'moving_out'].includes(effectiveStatus(p).key));
 
   $('#dashCards').innerHTML = `
     <div class="card"><div class="label">총 보유 물건</div><div class="value">${props.length}건</div>
@@ -168,6 +169,8 @@ function renderDashboard() {
       <div class="sub">갱신 통지 기한 확인</div></div>
     <div class="card ${noInsurance.length ? 'warn' : ''}"><div class="label">보증보험 미가입</div><div class="value">${noInsurance.length}건</div>
       <div class="sub">임대차 계약 ${leased.length}건 중</div></div>
+    <div class="card ${vacantish.length ? 'warn' : ''}"><div class="label">공실·모집·퇴거예정</div><div class="value">${vacantish.length}건</div>
+      <div class="sub">관리 현황 기준 · 미갱신 ${props.filter(isStatusStale).length}건</div></div>
     <div class="card"><div class="label">미완료 할일</div><div class="value">${todos.length}건</div>
       <div class="sub">민원·신고 업무</div></div>`;
 
@@ -203,6 +206,31 @@ function renderDashboard() {
       ${t.due ? ddayBadge(ddayOf(t.due)) : '<span class="badge gray">기한없음</span>'}
     </div>`).join('') || '<div class="empty">미완료 할일이 없습니다.</div>';
 
+  // 관리 현황: 최근 업데이트 / 갱신 필요
+  const recent = props.flatMap(p => (p.statusLog || []).slice(0, 3).map(e => ({ p, e })))
+    .sort((a, b) => b.e.ts - a.e.ts).slice(0, 8);
+  $('#dashStatusRecent').innerHTML = recent.length
+    ? recent.map(({ p, e }) => `
+      <div class="list-item clickable" data-stupdate="${p.id}">
+        <div><div class="title">${esc(propLabel(p))}</div>
+        <div class="sub">${fmtWhen(e.ts)} · ${esc(e.byName || e.by || '')}${e.note ? ' · ' + esc(e.note) : ''}</div></div>
+        ${STATUS_BY_KEY[e.state] ? `<span class="badge ${STATUS_BY_KEY[e.state].cls}">${STATUS_BY_KEY[e.state].label}</span>` : ''}
+      </div>`).join('')
+    : '<div class="empty">아직 입력된 관리 현황이 없습니다. 「📝 관리 현황」에서 입력하세요.</div>';
+  const stale = props.filter(isStatusStale)
+    .sort((a, b) => (a.status?.updatedAt || 0) - (b.status?.updatedAt || 0));
+  $('#dashStatusStale').innerHTML = stale.length
+    ? stale.slice(0, 8).map(p => {
+        const d = statusAgeDays(p);
+        return `
+        <div class="list-item clickable" data-stupdate="${p.id}">
+          <div><div class="title">${esc(propLabel(p))}</div>
+          <div class="sub">${p.managerId ? esc(managerName(p.managerId)) + ' · ' : ''}${d == null ? '현황 기록 없음' : `마지막 업데이트 ${d}일 전`}</div></div>
+          ${statusBadge(p)}
+        </div>`;
+      }).join('') + (stale.length > 8 ? `<div class="hint">외 ${stale.length - 8}건</div>` : '')
+    : '<div class="empty">모든 물건의 현황이 최근 30일 내 갱신되었습니다.</div>';
+
   // 사업자 정보
   $('#dashBiz').innerHTML = Store.data.business.map(b => `
     <div class="list-item">
@@ -226,6 +254,16 @@ function buildFilters() {
   fill($('#filterType'), props.map(p => p.type));
   fill($('#filterOwner'), props.map(p => p.owner));
   fill($('#filterRental'), props.map(p => p.rentalType));
+
+  // 관리현황 필터
+  const fst = $('#filterStatus');
+  if (fst) {
+    const cur = fst.value;
+    fst.innerHTML = '<option value="">전체 관리현황</option>' +
+      STATUS_STATES.map(x => `<option value="${x.key}">${x.label}</option>`).join('') +
+      '<option value="__none">현황 미입력</option>';
+    fst.value = cur;
+  }
 
   // 담당 중개사 필터 (관리자 전용)
   const fm = $('#filterManager');
@@ -292,7 +330,8 @@ function renderProperties() {
   buildFilters();
   const ft = $('#filterType').value, fo = $('#filterOwner').value,
         fr = $('#filterRental').value, fs = $('#filterSearch').value.trim(),
-        fm = $('#filterManager') ? $('#filterManager').value : '';
+        fm = $('#filterManager') ? $('#filterManager').value : '',
+        fst = $('#filterStatus') ? $('#filterStatus').value : '';
 
   // 일괄 배정용 중개사 목록
   const bm = $('#bulkManager');
@@ -309,7 +348,8 @@ function renderProperties() {
     (!fo || p.owner === fo) &&
     (!fr || p.rentalType === fr) &&
     (!fm || (fm === '__none' ? !p.managerId : p.managerId === fm)) &&
-    (!fs || (p.address + ' ' + p.unit).includes(fs))
+    (!fs || (p.address + ' ' + p.unit).includes(fs)) &&
+    (!fst || (fst === '__none' ? !p.status?.state : effectiveStatus(p).key === fst))
   );
 
   const isOwner = window.__REMS_ROLE__ === 'owner' && !currentViewAs();
@@ -323,6 +363,7 @@ function renderProperties() {
       <td>${p.acquireYear ? p.acquireYear + '년' : '-'}</td>
       <td class="addr">${p.address}<span class="map-mini" data-mapid="${p.id}">지도</span></td>
       <td>${p.unit || '-'}</td>
+      <td><span class="st-cell" data-stupdate="${p.id}" title="클릭하여 관리 현황 업데이트">${statusBadge(p)}</span></td>
       <td class="owner-only">${isOwner
         ? `<select class="mgr-pick" data-mgr="${p.id}" title="중개사 지정 또는 미지정으로 해제">${managerOptionsHtml(p.managerId)}</select>`
         : (managerName(p.managerId) || '<span class="muted-sm">미지정</span>')}</td>
@@ -330,7 +371,7 @@ function renderProperties() {
       <td>${ddayBadge(p.lease ? ddayOf(p.lease.end) : null)}</td>
       <td><button class="link-btn" onclick="openModal(${p.id})">상세</button></td>
     </tr>`).join('') ||
-    '<tr><td colspan="12" class="empty">조건에 맞는 물건이 없습니다.</td></tr>';
+    '<tr><td colspan="13" class="empty">조건에 맞는 물건이 없습니다.</td></tr>';
 
   const all = $('#mgrSelectAll');
   if (all) all.checked = false;
@@ -385,7 +426,7 @@ $('#btnBulkUnassign')?.addEventListener('click', () => {
   renderProperties();
 });
 
-['filterType', 'filterOwner', 'filterRental', 'filterManager'].forEach(id =>
+['filterType', 'filterOwner', 'filterRental', 'filterManager', 'filterStatus'].forEach(id =>
   $(`#${id}`).addEventListener('change', renderProperties));
 $('#filterSearch').addEventListener('input', renderProperties);
 
@@ -891,6 +932,296 @@ $('#btnModalDelete').addEventListener('click', () => {
 $('#btnAddProp').addEventListener('click', () => openModal(null));
 
 /* =========================================================
+ * 관리 현황 (중개사가 관리 물건의 상태를 입력·갱신)
+ *  p.status    = { state, condition, vacantSince, moveOutDate, askDeposit, askRent,
+ *                  listed, lastVisit, note, updatedAt, updatedBy, updatedByName }
+ *  p.statusLog = [{ ts, by, byName, state, note }]  (최신순, 최대 100건)
+ * ========================================================= */
+
+const STATUS_STATES = [
+  { key: 'leased',      label: '임대중',       cls: 'green' },
+  { key: 'vacant',      label: '공실',         cls: 'red' },
+  { key: 'marketing',   label: '임차인 모집중', cls: 'amber' },
+  { key: 'contracting', label: '계약 진행중',   cls: 'blue' },
+  { key: 'moving_out',  label: '퇴거 예정',     cls: 'purple' },
+  { key: 'repair',      label: '수리·점검중',   cls: 'amber' },
+  { key: 'self_use',    label: '자가사용·기타', cls: 'gray' },
+];
+const STATUS_BY_KEY = Object.fromEntries(STATUS_STATES.map(s => [s.key, s]));
+const CONDITION_LABEL = { good: '양호', minor: '경미 보수', repair: '수리 필요' };
+const STATUS_STALE_DAYS = 30;
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/** 표시용 현황: 입력값이 없으면 계약 유무로 추정 */
+function effectiveStatus(p) {
+  if (p.status && p.status.state) return { key: p.status.state, guessed: false };
+  if (p.lease && p.lease.end && ddayOf(p.lease.end) >= 0) return { key: 'leased', guessed: true };
+  return { key: '', guessed: true };
+}
+
+function statusBadge(p) {
+  const e = effectiveStatus(p);
+  if (!e.key) return '<span class="badge gray">미입력</span>';
+  const s = STATUS_BY_KEY[e.key] || { label: e.key, cls: 'gray' };
+  return `<span class="badge ${s.cls}" ${e.guessed ? 'title="입력된 현황이 없어 계약 정보로 추정"' : ''}>${s.label}${e.guessed ? ' (추정)' : ''}</span>`;
+}
+
+function statusAgeDays(p) {
+  const t = p.status && p.status.updatedAt;
+  if (!t) return null;
+  return Math.floor((Date.now() - t) / 86400000);
+}
+
+function isStatusStale(p) {
+  const d = statusAgeDays(p);
+  return d == null || d >= STATUS_STALE_DAYS;
+}
+
+function fmtWhen(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  return d.toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' }) +
+    ' ' + d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtMan(n) {
+  // 원 → 만원 단위 간단 표기 (예: 190,000,000 → 1억 9,000만)
+  n = Number(n) || 0;
+  if (!n) return '';
+  const eok = Math.floor(n / 1e8);
+  const man = Math.round((n % 1e8) / 1e4);
+  return (eok ? `${eok}억` : '') + (man ? `${eok ? ' ' : ''}${man.toLocaleString('ko-KR')}만` : '');
+}
+
+let statusChipFilter = '';  // '' | state key | '__none' | '__stale'
+
+function statusRows() {
+  const fm = $('#statusFilterManager') ? $('#statusFilterManager').value : '';
+  const q = ($('#statusSearch')?.value || '').trim();
+  return visibleProps().filter(p => {
+    if (fm && (fm === '__none' ? p.managerId : p.managerId !== fm)) return false;
+    if (q && !`${p.address} ${p.unit || ''} ${p.status?.note || ''} ${p.memo || ''}`.includes(q)) return false;
+    const e = effectiveStatus(p);
+    if (statusChipFilter === '__none') return !p.status?.state;
+    if (statusChipFilter === '__stale') return isStatusStale(p);
+    if (statusChipFilter) return e.key === statusChipFilter;
+    return true;
+  });
+}
+
+function renderStatusBoard() {
+  const props = visibleProps();
+  // 상단 요약 칩 (클릭 시 필터)
+  const count = k => props.filter(p => effectiveStatus(p).key === k).length;
+  const chips = [
+    { key: '', label: '전체', n: props.length },
+    ...STATUS_STATES.map(s => ({ key: s.key, label: s.label, n: count(s.key), cls: s.cls })),
+    { key: '__none', label: '현황 미입력', n: props.filter(p => !p.status?.state).length },
+    { key: '__stale', label: `${STATUS_STALE_DAYS}일+ 미갱신`, n: props.filter(isStatusStale).length },
+  ];
+  $('#statusChips').innerHTML = chips.map(c => `
+    <button type="button" class="status-chip ${statusChipFilter === c.key ? 'active' : ''} ${c.cls || ''}" data-chip="${c.key}">
+      ${c.label} <b>${c.n}</b>
+    </button>`).join('');
+
+  const fm = $('#statusFilterManager');
+  if (fm) {
+    const cur = fm.value;
+    fm.innerHTML = '<option value="">전체 중개사</option>' +
+      (Store.data.accounts || []).map(a => `<option value="${esc(a.id)}">${esc(a.name || a.id)}</option>`).join('') +
+      '<option value="__none">미지정</option>';
+    fm.value = cur;
+  }
+
+  const order = Object.fromEntries(STATUS_STATES.map((s, i) => [s.key, i]));
+  const rows = statusRows().sort((a, b) => {
+    // 조치가 필요한 상태(공실·모집·퇴거) 먼저, 같은 상태면 오래 미갱신 순
+    const pa = { vacant: 0, moving_out: 1, marketing: 2, contracting: 3, repair: 4 };
+    const ka = effectiveStatus(a).key, kb = effectiveStatus(b).key;
+    const ra = pa[ka] ?? (10 + (order[ka] ?? 99)), rb = pa[kb] ?? (10 + (order[kb] ?? 99));
+    if (ra !== rb) return ra - rb;
+    return (a.status?.updatedAt || 0) - (b.status?.updatedAt || 0);
+  });
+
+  $('#statusTable tbody').innerHTML = rows.map(p => {
+    const s = p.status || {};
+    const ask = [s.askDeposit ? `보 ${fmtMan(s.askDeposit)}` : '', s.askRent ? `월 ${fmtMan(s.askRent)}` : '']
+      .filter(Boolean).join(' / ');
+    const dates = [
+      p.lease?.end ? `만기 ${p.lease.end}` : '',
+      s.moveOutDate ? `퇴거 ${s.moveOutDate}` : '',
+      s.vacantSince ? `공실 ${s.vacantSince}~` : '',
+      s.lastVisit ? `점검 ${s.lastVisit}` : '',
+    ].filter(Boolean).map(t => `<div>${esc(t)}</div>`).join('');
+    const age = statusAgeDays(p);
+    const ageBadge = age == null ? '<span class="badge gray">기록없음</span>'
+      : age >= STATUS_STALE_DAYS ? `<span class="badge red">${age}일 전</span>`
+      : `<span class="badge green">${age === 0 ? '오늘' : age + '일 전'}</span>`;
+    return `
+    <tr>
+      <td class="addr"><b>${esc(propLabel(p))}</b>
+        <div class="sub" style="color:var(--muted);font-size:12px">${esc(p.type)}${p.managerId ? ' · ' + esc(managerName(p.managerId)) : ''}</div></td>
+      <td>${statusBadge(p)}${s.listed ? ' <span class="badge blue">광고중</span>' : ''}</td>
+      <td>${ask ? esc(ask) : '-'}</td>
+      <td class="st-dates">${dates || '-'}</td>
+      <td>${s.condition ? `<span class="badge ${s.condition === 'good' ? 'green' : s.condition === 'repair' ? 'red' : 'amber'}">${CONDITION_LABEL[s.condition]}</span>` : '-'}</td>
+      <td class="st-note">${s.note ? esc(s.note) : '<span class="muted-sm">-</span>'}</td>
+      <td>${ageBadge}<div class="muted-sm">${s.updatedByName ? esc(s.updatedByName) : ''}</div></td>
+      <td><button class="btn btn-primary btn-sm" data-stupdate="${p.id}">현황 업데이트</button></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="empty">조건에 맞는 물건이 없습니다.</td></tr>';
+}
+
+$('#statusChips')?.addEventListener('click', e => {
+  const b = e.target.closest('[data-chip]');
+  if (!b) return;
+  statusChipFilter = b.dataset.chip;
+  renderStatusBoard();
+});
+$('#statusFilterManager')?.addEventListener('change', renderStatusBoard);
+$('#statusSearch')?.addEventListener('input', renderStatusBoard);
+
+// 표 어디서든 「현황 업데이트」 버튼 → 모달
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-stupdate]');
+  if (b) openStatusModal(Number(b.dataset.stupdate));
+});
+
+function renderStatusLog(p) {
+  const log = p.statusLog || [];
+  $('#stLog').innerHTML = log.length
+    ? log.slice(0, 30).map(e => {
+        const s = STATUS_BY_KEY[e.state];
+        return `
+        <div class="st-log-item">
+          <div class="st-log-head">
+            ${s ? `<span class="badge ${s.cls}">${s.label}</span>` : ''}
+            <span class="muted-sm">${fmtWhen(e.ts)} · ${esc(e.byName || e.by || '')}</span>
+          </div>
+          ${e.note ? `<div class="st-log-note">${esc(e.note)}</div>` : ''}
+        </div>`;
+      }).join('') + (log.length > 30 ? `<div class="hint">최근 30건만 표시 (전체 ${log.length}건)</div>` : '')
+    : '<div class="empty">아직 업데이트 이력이 없습니다.</div>';
+}
+
+function openStatusModal(id) {
+  const p = Store.data.properties.find(x => x.id === id);
+  if (!p) return;
+  const s = p.status || {};
+  const e = effectiveStatus(p);
+  $('#stId').value = p.id;
+  $('#stTitle').textContent = `관리 현황 업데이트 · ${propLabel(p)}`;
+  $('#stCurrent').innerHTML = `
+    <div>${esc(p.address)} ${esc(p.unit || '')}</div>
+    <div class="muted-sm">현재: ${statusBadge(p)}
+      ${p.lease ? ` · 계약 ${esc(p.lease.start || '?')} ~ ${esc(p.lease.end || '?')} ${ddayBadge(ddayOf(p.lease.end))}` : ' · 계약 없음'}
+      ${s.updatedAt ? ` · 최근 업데이트 ${fmtWhen(s.updatedAt)} (${esc(s.updatedByName || s.updatedBy || '')})` : ''}</div>`;
+  $('#stState').innerHTML = STATUS_STATES.map(x => `<option value="${x.key}">${x.label}</option>`).join('');
+  $('#stState').value = s.state || e.key || 'leased';
+  $('#stCondition').value = s.condition || '';
+  $('#stVacantSince').value = s.vacantSince || '';
+  $('#stMoveOut').value = s.moveOutDate || '';
+  $('#stAskDeposit').value = s.askDeposit ? fmt(s.askDeposit) : '';
+  $('#stAskRent').value = s.askRent ? fmt(s.askRent) : '';
+  $('#stLastVisit').value = s.lastVisit || '';
+  $('#stListed').checked = !!s.listed;
+  $('#stNote').value = '';
+  renderStatusLog(p);
+  $('#statusModalBg').classList.remove('hidden');
+}
+window.openStatusModal = openStatusModal;
+
+function closeStatusModal() { $('#statusModalBg').classList.add('hidden'); }
+$('#btnStCancel')?.addEventListener('click', closeStatusModal);
+$('#statusModalBg')?.addEventListener('click', e => {
+  if (e.target === $('#statusModalBg')) closeStatusModal();
+});
+$('#btnStDetail')?.addEventListener('click', () => {
+  const id = Number($('#stId').value);
+  closeStatusModal();
+  openModal(id);
+});
+
+// 상태를 '공실'로 바꾸면 공실 시작일을 오늘로 미리 채움
+$('#stState')?.addEventListener('change', e => {
+  if (['vacant', 'marketing'].includes(e.target.value) && !$('#stVacantSince').value) {
+    $('#stVacantSince').value = new Date().toISOString().slice(0, 10);
+  }
+});
+
+$('#btnStSave')?.addEventListener('click', () => {
+  try {
+    const id = Number($('#stId').value);
+    const p = Store.data.properties.find(x => x.id === id);
+    if (!p) { alert('해당 물건을 찾을 수 없습니다.'); return; }
+    const actor = currentUploader();
+    const now = Date.now();
+    const prev = p.status || {};
+    const next = {
+      state: $('#stState').value,
+      condition: $('#stCondition').value,
+      vacantSince: $('#stVacantSince').value || '',
+      moveOutDate: $('#stMoveOut').value || '',
+      askDeposit: parseNum($('#stAskDeposit').value),
+      askRent: parseNum($('#stAskRent').value),
+      listed: $('#stListed').checked,
+      lastVisit: $('#stLastVisit').value || '',
+      note: ($('#stNote').value || '').trim() || prev.note || '',
+      updatedAt: now,
+      updatedBy: actor.id,
+      updatedByName: actor.name,
+    };
+    const typed = ($('#stNote').value || '').trim();
+    // 변경된 항목 요약 → 이력에 남김 (메모가 없을 때도 무엇이 바뀌었는지 알 수 있게)
+    const diffs = [];
+    if (next.state !== prev.state) diffs.push(`상태: ${STATUS_BY_KEY[prev.state]?.label || '미입력'} → ${STATUS_BY_KEY[next.state]?.label}`);
+    if ((next.askDeposit || 0) !== (prev.askDeposit || 0) || (next.askRent || 0) !== (prev.askRent || 0))
+      diffs.push(`희망조건: 보 ${fmtMan(next.askDeposit) || '-'} / 월 ${fmtMan(next.askRent) || '-'}`);
+    if ((next.moveOutDate || '') !== (prev.moveOutDate || '') && next.moveOutDate) diffs.push(`퇴거예정 ${next.moveOutDate}`);
+    if ((next.condition || '') !== (prev.condition || '') && next.condition) diffs.push(`시설: ${CONDITION_LABEL[next.condition]}`);
+    if (!!next.listed !== !!prev.listed) diffs.push(next.listed ? '매물 광고 시작' : '매물 광고 종료');
+    if ((next.lastVisit || '') !== (prev.lastVisit || '') && next.lastVisit) diffs.push(`점검 ${next.lastVisit}`);
+    if (!typed && !diffs.length && prev.updatedAt) {
+      // 변경 없음: 확인 시각만 갱신(“이상 없음” 기록)
+      if (!confirm('변경된 내용이 없습니다. "현황 확인(변동 없음)"으로 기록할까요?')) return;
+      diffs.push('현황 확인 · 변동 없음');
+    }
+    const logNote = typed
+      ? typed + (diffs.length ? ` (${diffs.join(', ')})` : '')
+      : diffs.join(', ');
+    p.status = next;
+    p.statusLog = [{ ts: now, by: actor.id, byName: actor.name, state: next.state, note: logNote },
+      ...(p.statusLog || [])].slice(0, 100);
+    Store.save();   // 중개사: 자동으로 관리자 패치 업로드 예약 / 관리자: 클라우드 업로드 예약
+    closeStatusModal();
+    renderAll();
+  } catch (err) {
+    console.error(err);
+    alert('현황 저장 중 오류가 발생했습니다: ' + (err && err.message ? err.message : err));
+  }
+});
+
+$('#btnExportStatusCsv')?.addEventListener('click', () => {
+  const head = ['번호', '물건', '주소', '동호수', '관리중개사', '관리현황', '현황입력여부', '시설상태', '매물광고',
+    '희망보증금', '희망월세', '공실시작일', '퇴거예정일', '최근점검일', '계약만기', '최근메모', '최근업데이트', '업데이트자'];
+  const rows = statusRows().map(p => {
+    const s = p.status || {};
+    const e = effectiveStatus(p);
+    return [p.id, propLabel(p), p.address, p.unit, managerName(p.managerId),
+      STATUS_BY_KEY[e.key]?.label || '', s.state ? '입력' : '추정/미입력',
+      CONDITION_LABEL[s.condition] || '', s.listed ? 'Y' : '',
+      s.askDeposit || '', s.askRent || '', s.vacantSince || '', s.moveOutDate || '', s.lastVisit || '',
+      p.lease?.end || '', s.note || '', s.updatedAt ? new Date(s.updatedAt).toLocaleString('ko-KR') : '',
+      s.updatedByName || ''];
+  });
+  downloadCsv('관리현황', [head, ...rows]);
+});
+
+/* =========================================================
  * 임대차 관리
  * ========================================================= */
 
@@ -1164,7 +1495,7 @@ function downloadCsv(filename, rows) {
 
 $('#btnExportPropCsv').addEventListener('click', () => {
   const head = ['번호', '소유자', '유형', '임대유형', '취득연도', '주임사등록일', '주소', '동호수',
-    '계약시작', '계약만기', '만기D-day', '보증금', '월세', '임차인', '연락처', '보증보험', '메모'];
+    '계약시작', '계약만기', '만기D-day', '보증금', '월세', '임차인', '연락처', '보증보험', '관리현황', '현황메모', '메모'];
   const rows = visibleProps().map(p => {
     const l = p.lease;
     const dday = l ? ddayOf(l.end) : null;
@@ -1172,7 +1503,8 @@ $('#btnExportPropCsv').addEventListener('click', () => {
       p.id, p.owner, p.type, p.rentalType, p.acquireYear, p.regDate, p.address, p.unit,
       l?.start || '', l?.end || '', dday == null ? '' : dday,
       l?.deposit || '', l?.monthlyRent || '', l?.tenantName || '', l?.tenantPhone || '',
-      l ? (l.insurance?.joined ? '가입' : '미가입') : '', p.memo || '',
+      l ? (l.insurance?.joined ? '가입' : '미가입') : '',
+      STATUS_BY_KEY[effectiveStatus(p).key]?.label || '', p.status?.note || '', p.memo || '',
     ];
   });
   downloadCsv('부동산현황', [head, ...rows]);
@@ -1249,6 +1581,7 @@ $('#fileImport').addEventListener('change', e => {
           const op = Store.data.properties.find(p => p.id === pp.id);
           if (!op) return;
           if (data.agentId && op.managerId && op.managerId !== data.agentId) return;
+          if (REMSSync.mergeStatus) REMSSync.mergeStatus(op, pp); // 관리 현황·이력
           op.lease = pp.lease || null;
           if (pp.memo != null) op.memo = pp.memo;
           op.meta = Object.assign({}, op.meta || {}, {
@@ -1261,7 +1594,7 @@ $('#fileImport').addEventListener('change', e => {
           Store.save();
           if (REMSSync.token && REMSSync.token()) REMSSync.schedulePush();
           renderAll();
-          alert(`중개사 작업 백업에서 ${n}건의 임차인·계약 정보를 병합했습니다.`);
+          alert(`중개사 작업 백업에서 ${n}건의 임차인·계약·관리현황 정보를 병합했습니다.`);
         } else {
           alert('병합할 물건이 없습니다. 배정·물건 번호를 확인해주세요.');
         }
@@ -1343,7 +1676,7 @@ $('#btnAgentSync')?.addEventListener('click', async () => {
   try {
     REMSSync.updateTag('관리자 반영 중…');
     await REMSSync.pushAgentPatch(Store.data);
-    alert('임차인·계약 변경을 서버에 올렸습니다.\n관리자(iceman74)가 「중개사 작업 병합·반영」 또는 로그인 시 자동 병합으로 확인할 수 있습니다.');
+    alert('임차인·계약·관리현황 변경을 서버에 올렸습니다.\n관리자(iceman74)가 「중개사 작업 병합·반영」 또는 로그인 시 자동 병합으로 확인할 수 있습니다.');
     REMSSync.updateTag('관리자 반영 완료');
   } catch (e) {
     alert('서버 반영 실패: ' + e.message);
@@ -1361,6 +1694,7 @@ $('#btnAgentExport')?.addEventListener('click', () => {
     role: 'agent',
     properties: (Store.data.properties || []).map(p => ({
       id: p.id, address: p.address, unit: p.unit, lease: p.lease, memo: p.memo, meta: p.meta,
+      status: p.status || null, statusLog: p.statusLog || [],
     })),
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -1675,6 +2009,7 @@ function renderAll() {
   }
   renderDashboard();
   renderProperties();
+  renderStatusBoard();
   renderLeases();
   renderTodos();
   populatePropPickers();
@@ -1738,7 +2073,7 @@ async function reconcileAgentPatches() {
     renderAll();
     REMSSync.updateTag('중개사 작업 ' + r.changed + '건 병합됨');
     const tip = $('#mgrBulkMsg');
-    if (tip) tip.textContent = `✓ 중개사 임차인·계약 작업 ${r.changed}건을 관리자 데이터에 병합했습니다.`;
+    if (tip) tip.textContent = `✓ 중개사 작업(임차인·계약·관리현황) ${r.changed}건을 관리자 데이터에 병합했습니다.`;
   } catch (err) {
     REMSSync.updateTag();
     console.warn('patch merge', err);

@@ -131,6 +131,47 @@ window.REMSSync = (function () {
     return data;
   }
 
+  /* ---------- 관리 현황(status) 병합 ----------
+   * status    : 최신 1건 (status.updatedAt 이 더 큰 쪽 채택)
+   * statusLog : 업데이트 이력 (ts|by 기준 합집합, 최신순 최대 100건)
+   * 임차인·계약(lease) 병합과 독립적으로 동작 → 현황만 바꿔도 계약 정보는 건드리지 않음 */
+  var STATUS_LOG_MAX = 100;
+
+  function mergeStatusLogs(a, b) {
+    var seen = {};
+    var out = [];
+    (a || []).concat(b || []).forEach(function (e) {
+      if (!e || !e.ts) return;
+      var k = e.ts + '|' + (e.by || '');
+      if (seen[k]) return;
+      seen[k] = true;
+      out.push(e);
+    });
+    out.sort(function (x, y) { return (y.ts || 0) - (x.ts || 0); });
+    return out.slice(0, STATUS_LOG_MAX);
+  }
+
+  /** src(패치/로컬)의 현황을 target(마스터/클라우드)에 병합. 변경 여부 반환 */
+  function mergeStatus(target, src) {
+    if (!target || !src) return false;
+    var changed = false;
+    var ts = (target.status && target.status.updatedAt) || 0;
+    var ss = (src.status && src.status.updatedAt) || 0;
+    if (src.status && ss > ts) {
+      target.status = JSON.parse(JSON.stringify(src.status));
+      changed = true;
+    }
+    if (Array.isArray(src.statusLog) && src.statusLog.length) {
+      var before = (target.statusLog || []).length;
+      var merged = mergeStatusLogs(target.statusLog, src.statusLog);
+      if (merged.length !== before) {
+        target.statusLog = merged;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   /** 중개사 로컬(임차인 작업)과 클라우드 배정본을 물건 단위로 병합 */
   function mergeAgentLocal(cloud, local) {
     if (!cloud) return local;
@@ -142,7 +183,9 @@ window.REMSSync = (function () {
     (local.properties || []).forEach(function (lp) {
       var cp = byId[lp.id];
       if (!cp) return;
-      var lt = (lp.meta && lp.meta.updatedAt) || (local.meta && local.meta.updatedAt) || 0;
+      // 관리 현황은 계약 정보와 별개로 최신본 병합
+      if (mergeStatus(cp, lp)) merged++;
+      var lt =(lp.meta && lp.meta.updatedAt) || (local.meta && local.meta.updatedAt) || 0;
       var ct = (cp.meta && cp.meta.updatedAt) || (out.meta && out.meta.updatedAt) || 0;
       var lLease = lp.lease || null;
       var cLease = cp.lease || null;
@@ -377,8 +420,12 @@ window.REMSSync = (function () {
           id: p.id,
           lease: p.lease || null,
           memo: p.memo || '',
+          status: p.status || null,
+          statusLog: p.statusLog || [],
           meta: {
-            updatedAt: (p.meta && p.meta.updatedAt) || (data.meta && data.meta.updatedAt) || now,
+            // 물건별 수정시각만 사용 (전체 데이터 시각으로 대체하면, 중개사가 다른 물건의
+            // 현황만 바꿔도 관리자가 고친 계약 정보를 옛 값으로 덮어쓰는 문제가 생김)
+            updatedAt: (p.meta && p.meta.updatedAt) || 0,
           },
         };
       }),
@@ -436,26 +483,38 @@ window.REMSSync = (function () {
         if (!op) return;
         // 배정된 중개사 물건만 병합
         if (op.managerId && op.managerId !== a.id) return;
+        // ① 관리 현황 (계약 정보와 독립)
+        var statusChanged = mergeStatus(op, pp);
+        // ② 임차인·계약
+        var leaseChanged = false;
         var ot = (op.meta && op.meta.updatedAt) || 0;
-        var pt = (pp.meta && pp.meta.updatedAt) || patch.updatedAt || 0;
+        var pt = (pp.meta && pp.meta.updatedAt) || 0;
         var oLease = op.lease || null;
         var pLease = pp.lease || null;
         var patchTenant = !!(pLease && (pLease.tenantName || pLease.tenantPhone));
         var ownerTenant = !!(oLease && (oLease.tenantName || oLease.tenantPhone));
         var take = (pt > ot) || (patchTenant && !ownerTenant);
-        if (!take) return;
-        var before = JSON.stringify(oLease || null);
-        var after = JSON.stringify(pLease || null);
-        if (before === after && (pp.memo || '') === (op.memo || '')) return;
-        op.lease = pLease;
-        if (pp.memo != null) op.memo = pp.memo;
-        op.meta = Object.assign({}, op.meta || {}, {
-          updatedAt: Math.max(ot, pt, Date.now()),
-          source: a.id,
-        });
+        if (take) {
+          var before = JSON.stringify(oLease || null);
+          var after = JSON.stringify(pLease || null);
+          if (before !== after || (pp.memo || '') !== (op.memo || '')) {
+            op.lease = pLease;
+            if (pp.memo != null) op.memo = pp.memo;
+            op.meta = Object.assign({}, op.meta || {}, {
+              updatedAt: Math.max(ot, pt, Date.now()),
+              source: a.id,
+            });
+            leaseChanged = true;
+          }
+        }
+        if (!statusChanged && !leaseChanged) return;
         byId[pp.id] = op;
         changed++;
-        details.push({ agentId: a.id, propId: pp.id, tenant: (pLease && pLease.tenantName) || '' });
+        details.push({
+          agentId: a.id, propId: pp.id,
+          tenant: (op.lease && op.lease.tenantName) || '',
+          lease: leaseChanged, status: statusChanged,
+        });
       });
     }
     src.properties = (src.properties || []).map(function (p) { return byId[p.id] || p; });
@@ -544,6 +603,7 @@ window.REMSSync = (function () {
     pullDecrypt: pullDecrypt, pullAccountsList: pullAccountsList,
     pullAssignments: pullAssignments, buildAssignments: buildAssignments,
     applyAssignmentFilter: applyAssignmentFilter, mergeAgentLocal: mergeAgentLocal,
+    mergeStatus: mergeStatus, mergeStatusLogs: mergeStatusLogs,
     buildAccountEntries: buildAccountEntries, pushAccounts: pushAccounts,
     push: push, schedulePush: schedulePush, updateTag: updateTag,
     pushAgentPatch: pushAgentPatch, pullAgentPatch: pullAgentPatch,

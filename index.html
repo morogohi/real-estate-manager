@@ -7,7 +7,7 @@
 <title>부동산 통합 관리 시스템</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=226">
+<link rel="stylesheet" href="css/style.css?v=227">
 </head>
 <body>
 
@@ -27,6 +27,7 @@
     <nav class="nav">
       <button class="nav-item active" data-tab="dashboard">📊 대시보드</button>
       <button class="nav-item" data-tab="properties">🏘️ 부동산 현황</button>
+      <button class="nav-item" data-tab="status">📝 관리 현황</button>
       <button class="nav-item" data-tab="leases">📋 임대차 관리</button>
       <button class="nav-item" data-tab="tax">🧮 세금 계산기</button>
       <button class="nav-item" data-tab="income">🧾 임대소득 신고</button>
@@ -80,6 +81,16 @@
           <div id="dashBiz"></div>
         </div>
       </div>
+      <div class="grid-2">
+        <div class="panel">
+          <h2>📝 최근 관리 현황 업데이트</h2>
+          <div id="dashStatusRecent"></div>
+        </div>
+        <div class="panel">
+          <h2>⏳ 현황 갱신 필요 (30일 이상 미갱신)</h2>
+          <div id="dashStatusStale"></div>
+        </div>
+      </div>
     </section>
 
     <!-- 부동산 현황 -->
@@ -96,6 +107,7 @@
         <select id="filterOwner"><option value="">전체 소유자</option></select>
         <select id="filterRental"><option value="">전체 임대유형</option></select>
         <select id="filterManager" class="owner-only"><option value="">전체 중개사</option></select>
+        <select id="filterStatus"><option value="">전체 관리현황</option></select>
         <input type="search" id="filterSearch" placeholder="주소·동호수 검색">
       </div>
       <div class="mgr-bulk owner-only" id="mgrBulkBar">
@@ -111,7 +123,34 @@
             <tr>
               <th class="owner-only" style="width:36px"></th>
               <th>#</th><th>소유자</th><th>유형</th><th>임대유형</th><th>취득</th>
-              <th>주소</th><th>동호수</th><th class="owner-only">관리 중개사 (지정·해제)</th><th>계약만기</th><th>D-day</th><th></th>
+              <th>주소</th><th>동호수</th><th>관리현황</th><th class="owner-only">관리 중개사 (지정·해제)</th><th>계약만기</th><th>D-day</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 관리 현황 (중개사 현황 보고) -->
+    <section class="tab hidden" id="tab-status">
+      <div class="page-head">
+        <h1>관리 현황</h1>
+        <button class="btn btn-ghost" id="btnExportStatusCsv">엑셀(CSV) 내보내기</button>
+      </div>
+      <p class="disclaimer">관리 물건의 현재 상태(임대중·공실·모집중·계약진행·퇴거예정·수리 등)와 희망 조건, 점검 내용을 입력·갱신합니다.
+        <span class="agent-only">저장하면 자동으로 관리자에게 반영됩니다.</span>
+        <span class="owner-only">중개사가 입력한 현황은 로그인 시·「중개사 작업 병합」 시 자동으로 합쳐집니다.</span></p>
+      <div class="status-chips" id="statusChips"></div>
+      <div class="filters">
+        <select id="statusFilterManager" class="owner-only"><option value="">전체 중개사</option></select>
+        <input type="search" id="statusSearch" placeholder="주소·동호수·메모 검색">
+      </div>
+      <div class="table-wrap">
+        <table class="table" id="statusTable">
+          <thead>
+            <tr>
+              <th>물건</th><th>관리현황</th><th>희망 조건</th><th>주요 일자</th><th>시설</th>
+              <th>최근 메모</th><th>최근 업데이트</th><th></th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -437,6 +476,44 @@
   </div>
 </div>
 
+<!-- 관리 현황 업데이트 모달 (중개사·관리자 공용) -->
+<div class="modal-bg hidden" id="statusModalBg">
+  <div class="modal">
+    <h2 id="stTitle">관리 현황 업데이트</h2>
+    <input type="hidden" id="stId">
+    <div class="st-current" id="stCurrent"></div>
+    <div class="form-grid">
+      <label>현재 상태
+        <select id="stState"></select>
+      </label>
+      <label>시설 상태
+        <select id="stCondition">
+          <option value="">— 선택 —</option>
+          <option value="good">양호</option>
+          <option value="minor">경미한 보수 필요</option>
+          <option value="repair">수리 필요</option>
+        </select>
+      </label>
+      <label>공실 시작일 <input type="date" id="stVacantSince"></label>
+      <label>퇴거 예정일 <input type="date" id="stMoveOut"></label>
+      <label>희망 보증금(원) <input type="text" id="stAskDeposit" class="num" placeholder="예: 10,000,000"></label>
+      <label>희망 월세(원) <input type="text" id="stAskRent" class="num" placeholder="예: 750,000"></label>
+      <label>최근 방문·점검일 <input type="date" id="stLastVisit"></label>
+      <label class="check"><input type="checkbox" id="stListed"> 매물 광고 중</label>
+      <label class="wide">이번 업데이트 내용 (이력에 남음)
+        <textarea id="stNote" rows="3" placeholder="예: 임차인 퇴거 통보 받음, 도배·장판 견적 요청 / 주말 2팀 방문 예정"></textarea>
+      </label>
+    </div>
+    <h3>🕘 현황 업데이트 이력</h3>
+    <div id="stLog" class="st-log"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btnStCancel">닫기</button>
+      <button class="btn btn-ghost" id="btnStDetail">물건 상세 열기</button>
+      <button class="btn btn-primary" id="btnStSave" type="button">현황 저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- 공인중개사 계정 관리 모달 (소유자 전용) -->
 <div class="modal-bg hidden" id="acctModalBg">
   <div class="modal">
@@ -495,7 +572,7 @@
       <button class="btn btn-ghost" id="btnSyncPull">클라우드에서 내려받기</button>
       <button class="btn btn-primary" id="btnMergePatches">중개사 작업 병합·반영</button>
     </div>
-    <p class="hint">중개사가 저장한 임차인·계약 정보는 암호화 패치로 올라옵니다. <b>중개사 작업 병합·반영</b>을 누르면 관리자 마스터 데이터에 합친 뒤 다시 배포합니다.</p>
+    <p class="hint">중개사가 저장한 임차인·계약 정보와 관리 현황은 암호화 패치로 올라옵니다. <b>중개사 작업 병합·반영</b>을 누르면 관리자 마스터 데이터에 합친 뒤 다시 배포합니다.</p>
     <div class="acct-msg" id="syncMsg"></div>
 
     <div class="modal-actions">
@@ -521,15 +598,15 @@
   </div>
 </div>
 
-<script src="js/crypto-util.js?v=226"></script>
-<script src="js/db.js?v=226"></script>
-<script src="js/data.js?v=226"></script>
-<script src="js/sync.js?v=226"></script>
-<script src="js/data.enc.js?v=226"></script>
-<script src="js/accounts.enc.js?v=226"></script>
-<script src="js/assignments.js?v=226"></script>
-<script src="js/auth.js?v=226"></script>
-<script src="js/tax.js?v=226"></script>
-<script src="js/app.js?v=226"></script>
+<script src="js/crypto-util.js?v=227"></script>
+<script src="js/db.js?v=227"></script>
+<script src="js/data.js?v=227"></script>
+<script src="js/sync.js?v=227"></script>
+<script src="js/data.enc.js?v=227"></script>
+<script src="js/accounts.enc.js?v=227"></script>
+<script src="js/assignments.js?v=227"></script>
+<script src="js/auth.js?v=227"></script>
+<script src="js/tax.js?v=227"></script>
+<script src="js/app.js?v=227"></script>
 </body>
 </html>
