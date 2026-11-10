@@ -5,7 +5,7 @@ a = Analysis(
     ['desktop.py'],
     pathex=[],
     binaries=[],
-    datas=[('index.html', '.'), ('css', 'css'), ('js', 'js')],
+    datas=[('index.html', '.'), ('copyright.html', '.'), ('css', 'css'), ('js', 'js')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
