@@ -438,3 +438,8 @@ hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
 
   .auth-card { padding: 26px 20px 20px; }
 }
+
+/* 저작권 표시 (본문 맨 아래, 고정 요소 없음) */
+.site-footer { margin-top: 40px; padding-top: 14px; border-top: 1px solid #d7dce5; color: #5b6475; }
+.auth-cr { margin-top: 10px; font-size: 12px; line-height: 1.6; word-break: keep-all; overflow-wrap: anywhere; }
+.auth-cr a { color: inherit; text-decoration: underline; }

@@ -152,6 +152,7 @@
       '  <button class="auth-btn" id="authBtn" type="submit">로그인</button>',
       '  <div class="auth-msg" id="authMsg"></div>',
       '  <div class="auth-foot">계정에 따라 접근 가능한 물건만 복호화되어 표시됩니다.</div>',
+      '  <div class="auth-foot auth-cr">© 2026 양인석. All rights reserved. 본 사이트의 자체 제작 소스코드·디자인·콘텐츠에 대한 저작권은 양인석에게 있습니다. 사전 서면 허락 없는 복제·수정·재배포 및 별도 서비스로의 이용을 금합니다. 제3자 자료는 해당 권리자의 이용조건을 따릅니다. <a href="copyright.html">저작권 및 이용안내</a></div>',
       '</form>'
     ].join('');
     document.body.appendChild(ov);
